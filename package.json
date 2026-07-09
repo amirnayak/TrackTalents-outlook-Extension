@@ -1,0 +1,19 @@
+{
+  "name": "tracktalents-outlook",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TrackTalents Outlook add-in app.",
+  "scripts": {
+    "certs:install": "office-addin-dev-certs install",
+    "certs:verify": "office-addin-dev-certs verify",
+    "dev": "node ./scripts/dev-server.js",
+    "start": "node ./scripts/dev-server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "office-addin-dev-certs": "^2.0.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
