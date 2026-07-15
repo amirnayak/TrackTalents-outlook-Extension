@@ -5,10 +5,11 @@ const path = require("path");
 const express = require("express");
 const devCerts = require("office-addin-dev-certs");
 
-const HTTPS_PORT = Number(process.env.PORT || 3001);
-const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3002);
+const HTTPS_PORT = Number(process.env.PORT || 3201);
+const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
 const HOST = "localhost";
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
+const APP_HOST = process.env.APP_HOST || "https://test.tracktalents.com";
 const app = express();
 
 app.use((req, res, next) => {
@@ -26,7 +27,16 @@ app.get("/health", (_req, res) => {
     host: HOST,
     httpsPort: HTTPS_PORT,
     httpPreviewPort: HTTP_PREVIEW_PORT,
-    apiHost: API_HOST
+    apiHost: API_HOST,
+    appHost: APP_HOST
+  });
+});
+
+app.get("/api/config", (_req, res) => {
+  res.json({
+    appHost: APP_HOST,
+    loginPath: "/login",
+    forgotPasswordPath: "/forgotpassword"
   });
 });
 
@@ -115,7 +125,7 @@ async function start() {
 }
 
 start().catch((error) => {
-  console.error("Failed to start the Outlook POC server.");
+  console.error("Failed to start the Outlook server.");
   console.error(error);
   process.exit(1);
 });
