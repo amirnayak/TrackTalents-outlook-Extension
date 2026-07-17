@@ -9,7 +9,7 @@ const HTTPS_PORT = Number(process.env.PORT || 3201);
 const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
 const HOST = "localhost";
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
-const APP_HOST = process.env.APP_HOST || "https://test.tracktalents.com";
+const APP_HOST = process.env.APP_HOST || "http://localhost:3000";
 const app = express();
 
 app.use((req, res, next) => {
@@ -35,6 +35,7 @@ app.get("/health", (_req, res) => {
 app.get("/api/config", (_req, res) => {
   res.json({
     appHost: APP_HOST,
+    authBridgePath: "/outlook-auth-bridge",
     loginPath: "/login",
     forgotPasswordPath: "/forgotpassword"
   });
