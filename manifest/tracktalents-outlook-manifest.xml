@@ -21,7 +21,7 @@
   </Hosts>
   <Requirements>
     <Sets>
-      <Set Name="Mailbox" MinVersion="1.5" />
+      <Set Name="Mailbox" MinVersion="1.8" />
     </Sets>
   </Requirements>
   <FormSettings>
@@ -47,7 +47,7 @@
     xmlns="http://schemas.microsoft.com/office/mailappversionoverrides"
     xsi:type="VersionOverridesV1_0">
     <Requirements>
-      <bt:Sets DefaultMinVersion="1.5">
+      <bt:Sets DefaultMinVersion="1.8">
         <bt:Set Name="Mailbox" />
       </bt:Sets>
     </Requirements>
@@ -120,5 +120,85 @@
         <bt:String id="ShowPaneDescription" DefaultValue="Open the TrackTalents Outlook add-in." />
       </bt:LongStrings>
     </Resources>
+    <VersionOverrides
+      xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1"
+      xsi:type="VersionOverridesV1_1">
+      <Requirements>
+        <bt:Sets DefaultMinVersion="1.8">
+          <bt:Set Name="Mailbox" />
+        </bt:Sets>
+      </Requirements>
+      <Hosts>
+        <Host xsi:type="MailHost">
+          <DesktopFormFactor>
+            <FunctionFile resid="Commands.Url" />
+            <ExtensionPoint xsi:type="MessageReadCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="TrackTalents.ReadGroup">
+                  <Label resid="GroupLabel" />
+                  <Control xsi:type="Button" id="TrackTalents.ReadShowPane">
+                    <Label resid="ShowPaneLabel" />
+                    <Supertip>
+                      <Title resid="ShowPaneLabel" />
+                      <Description resid="ShowPaneDescription" />
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16" />
+                      <bt:Image size="32" resid="Icon.32" />
+                      <bt:Image size="80" resid="Icon.80" />
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url" />
+                      <SupportsPinning>true</SupportsPinning>
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+            <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="TrackTalents.ComposeGroup">
+                  <Label resid="GroupLabel" />
+                  <Control xsi:type="Button" id="TrackTalents.ComposeShowPane">
+                    <Label resid="ShowPaneLabel" />
+                    <Supertip>
+                      <Title resid="ShowPaneLabel" />
+                      <Description resid="ShowPaneDescription" />
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16" />
+                      <bt:Image size="32" resid="Icon.32" />
+                      <bt:Image size="80" resid="Icon.80" />
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url" />
+                      <SupportsPinning>true</SupportsPinning>
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+          </DesktopFormFactor>
+        </Host>
+      </Hosts>
+      <Resources>
+        <bt:Images>
+          <bt:Image id="Icon.16" DefaultValue="https://localhost:3201/assets/icon-16.png" />
+          <bt:Image id="Icon.32" DefaultValue="https://localhost:3201/assets/icon-32.png" />
+          <bt:Image id="Icon.80" DefaultValue="https://localhost:3201/assets/icon-80.png" />
+        </bt:Images>
+        <bt:Urls>
+          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3201/taskpane.html" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3201/taskpane.html" />
+        </bt:Urls>
+        <bt:ShortStrings>
+          <bt:String id="GroupLabel" DefaultValue="TrackTalents" />
+          <bt:String id="ShowPaneLabel" DefaultValue="Open TrackTalents" />
+        </bt:ShortStrings>
+        <bt:LongStrings>
+          <bt:String id="ShowPaneDescription" DefaultValue="Open the TrackTalents Outlook add-in." />
+        </bt:LongStrings>
+      </Resources>
+    </VersionOverrides>
   </VersionOverrides>
 </OfficeApp>
