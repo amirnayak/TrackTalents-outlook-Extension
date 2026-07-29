@@ -21,6 +21,13 @@ const ACTIONS = [
     intent: "create-job"
   },
   {
+    id: "attach-email",
+    label: "Attach Email",
+    iconSrc: "/assets/action-icons/attach-email.svg",
+    path: "/sentmails",
+    intent: "attach-email"
+  },
+  {
     id: "add-contact",
     label: "Add Contact",
     iconSrc: "/assets/action-icons/add-contact.png",
@@ -44,6 +51,7 @@ const ACTIONS = [
 ];
 
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
+const ATTACH_EMAIL_PAGE_SIZE = 10;
 
 const state = {
   officeReady: false,
@@ -63,6 +71,7 @@ const state = {
   loginSubmitting: false,
   pendingActionId: null,
   showLoginModal: false,
+  attachEmail: buildAttachEmailState(),
   importModal: buildImportModalState(),
   loginForm: {
     email: "",
@@ -95,6 +104,25 @@ function buildImportModalState() {
     resumeAttachmentId: "",
     error: "",
     submitting: false
+  };
+}
+
+function buildAttachEmailState() {
+  return {
+    open: false,
+    activeTab: "contacts",
+    search: "",
+    loading: false,
+    error: "",
+    submitting: false,
+    contacts: [],
+    candidates: [],
+    contactsTotal: 0,
+    candidatesTotal: 0,
+    contactsPage: 0,
+    candidatesPage: 0,
+    selectedContacts: [],
+    selectedCandidates: []
   };
 }
 
@@ -147,6 +175,12 @@ function buildPreviewItem() {
       displayName: "Ananya Sharma",
       email: "ananya.sharma@example.com"
     },
+    to: [
+      {
+        displayName: "TrackTalents Hiring",
+        email: "hiring@tracktalents.com"
+      }
+    ],
     fromDisplay: "Ananya Sharma <ananya.sharma@example.com>",
     toCount: 1,
     attachments,
@@ -168,6 +202,45 @@ function isAddCandidateAction(actionId) {
   return actionId === "add-candidate";
 }
 
+function isResumeImportAction(actionId) {
+  return (
+    actionId === "add-candidate" ||
+    actionId === "submit-resume-contact" ||
+    actionId === "source-resume-job"
+  );
+}
+
+function isAttachEmailAction(actionId) {
+  return actionId === "attach-email";
+}
+
+function getEmailAddinRecordType(actionId) {
+  switch (actionId) {
+    case "add-job":
+    case "source-resume-job":
+      return "job";
+    case "add-contact":
+    case "submit-resume-contact":
+      return "contact";
+    case "reply-all":
+      return "email";
+    case "add-candidate":
+    default:
+      return "candidate";
+  }
+}
+
+function buildActionSuccessMessage(actionId, options = {}) {
+  const actionLabel = actionLabelFromId(actionId);
+  const fileName = String(options.fileName || "").trim();
+
+  if (fileName) {
+    return `${actionLabel} opened with ${fileName} imported from Outlook.`;
+  }
+
+  return `${actionLabel} opened from Outlook.`;
+}
+
 function formatContextId(item) {
   const source = item?.itemId || "preview-context";
   return String(source).replace(/[^a-zA-Z0-9]/g, "").slice(0, 18) || "previewcontext";
@@ -176,14 +249,14 @@ function formatContextId(item) {
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (size <= 0) {
-    return "0 KB";
+    return "File Size - 0KB";
   }
 
   if (size >= 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    return `File Size - ${(size / (1024 * 1024)).toFixed(1)}MB`;
   }
 
-  return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `File Size - ${Math.max(1, Math.round(size / 1024))}KB`;
 }
 
 function normalizeAttachmentContentFormat(format) {
@@ -286,6 +359,38 @@ function createImportAttachmentSelection(attachment, index) {
   };
 }
 
+function normalizeRecipient(recipient) {
+  if (!recipient || typeof recipient !== "object") {
+    return {
+      displayName: "",
+      email: ""
+    };
+  }
+
+  return {
+    displayName:
+      recipient.displayName ||
+      recipient.name ||
+      recipient.Name ||
+      "",
+    email:
+      recipient.email ||
+      recipient.emailAddress ||
+      recipient.Email ||
+      ""
+  };
+}
+
+function normalizeRecipientList(recipients) {
+  if (!Array.isArray(recipients)) {
+    return [];
+  }
+
+  return recipients
+    .map(normalizeRecipient)
+    .filter((recipient) => recipient.displayName || recipient.email);
+}
+
 function getImportableAttachments() {
   return Array.isArray(state.currentItem?.attachments)
     ? state.currentItem.attachments.filter((attachment) => !attachment.isInline)
@@ -320,7 +425,9 @@ function openImportModal(actionId) {
 }
 
 function buildImportModalForAction(actionId) {
-  const attachments = getImportableAttachments().map(createImportAttachmentSelection);
+  const attachments = getImportableAttachments()
+    .map(createImportAttachmentSelection)
+    .filter((attachment) => (isResumeImportAction(actionId) ? attachment.canBeResume : true));
   const defaultResume = attachments.find((attachment) => attachment.canBeResume);
 
   return {
@@ -333,13 +440,580 @@ function buildImportModalForAction(actionId) {
   };
 }
 
+function getAttachEmailSelectedTotal() {
+  return state.attachEmail.selectedContacts.length + state.attachEmail.selectedCandidates.length;
+}
+
+function getAttachEmailPageCount(type) {
+  const total =
+    type === "candidates"
+      ? Number(state.attachEmail.candidatesTotal || 0)
+      : Number(state.attachEmail.contactsTotal || 0);
+  return Math.max(1, Math.ceil(total / ATTACH_EMAIL_PAGE_SIZE));
+}
+
+function getAttachEmailCurrentPage(type) {
+  return type === "candidates"
+    ? Number(state.attachEmail.candidatesPage || 0)
+    : Number(state.attachEmail.contactsPage || 0);
+}
+
+function getAttachEmailRows(type) {
+  return type === "candidates" ? state.attachEmail.candidates : state.attachEmail.contacts;
+}
+
+function isAttachEmailSelected(type, recordId) {
+  const selected =
+    type === "candidates" ? state.attachEmail.selectedCandidates : state.attachEmail.selectedContacts;
+  return selected.some((item) => item.id === recordId);
+}
+
+function resetAttachEmailState() {
+  state.attachEmail = buildAttachEmailState();
+}
+
+function closeAttachEmailPanel() {
+  resetAttachEmailState();
+}
+
+function buildAttachEmailSearchFilter(type, search) {
+  const value = String(search || "").trim();
+  if (!value) {
+    return "";
+  }
+
+  if (type === "candidates") {
+    return JSON.stringify([
+      ["CandidateData.FirstName", "contains", value],
+      "or",
+      ["CandidateData.LastName", "contains", value],
+      "or",
+      ["CandidateData.Contact.Email1", "contains", value],
+      "or",
+      ["CandidateData.JobTitle", "contains", value],
+      "or",
+      ["CandidateData.CurrentLocation", "contains", value]
+    ]);
+  }
+
+  return JSON.stringify([
+    ["ContactData.Name", "contains", value],
+    "or",
+    ["ContactData.Contact.Email1", "contains", value],
+    "or",
+    ["ContactData.CompanyName", "contains", value],
+    "or",
+    ["ContactData.JobTitle", "contains", value]
+  ]);
+}
+
+function normalizeAttachEmailContact(record) {
+  const contactData = record?.ContactData && typeof record.ContactData === "object" ? record.ContactData : {};
+  const contactInfo = contactData?.Contact && typeof contactData.Contact === "object" ? contactData.Contact : {};
+  const firstName = String(contactData.FirstName || "").trim();
+  const lastName = String(contactData.LastName || "").trim();
+  const fullName = String(contactData.Name || `${firstName} ${lastName}`).trim() || "Unnamed Contact";
+
+  return {
+    id: String(record?._id || ""),
+    name: fullName,
+    email: String(contactInfo.Email1 || contactInfo.Email2 || ""),
+    company: String(contactData.CompanyName || ""),
+    subtitle: String(contactData.JobTitle || ""),
+    raw: record
+  };
+}
+
+function normalizeAttachEmailCandidate(record) {
+  const candidateData =
+    record?.CandidateData && typeof record.CandidateData === "object" ? record.CandidateData : {};
+  const contactInfo =
+    candidateData?.Contact && typeof candidateData.Contact === "object" ? candidateData.Contact : {};
+  const firstName = String(candidateData.FirstName || "").trim();
+  const lastName = String(candidateData.LastName || "").trim();
+  const fullName = `${firstName} ${lastName}`.trim() || "Unnamed Candidate";
+
+  return {
+    id: String(record?._id || ""),
+    name: fullName,
+    email: String(contactInfo.Email1 || contactInfo.Email2 || ""),
+    title: String(candidateData.JobTitle || ""),
+    location: String(candidateData.CurrentLocation || candidateData.Relocation || ""),
+    raw: record
+  };
+}
+
+async function fetchAttachEmailRecords(type, options = {}) {
+  const page = Math.max(0, Number(options.page || 0));
+  const search = String(options.search ?? state.attachEmail.search ?? "").trim();
+  const skip = page * ATTACH_EMAIL_PAGE_SIZE;
+  const filter = buildAttachEmailSearchFilter(type, search);
+  const query = new URLSearchParams({
+    skip: String(skip),
+    take: String(ATTACH_EMAIL_PAGE_SIZE),
+    requireTotalCount: "true"
+  });
+
+  if (filter) {
+    query.set("filter", filter);
+  }
+
+  const response = await fetch(`/api/attach-email/${type}?${query.toString()}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    }
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || `Unable to load TrackTalents ${type}.`);
+  }
+
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  const totalCount = Math.max(0, Number(payload?.totalCount || 0));
+
+  return {
+    rows:
+      type === "candidates"
+        ? rows.map(normalizeAttachEmailCandidate)
+        : rows.map(normalizeAttachEmailContact),
+    totalCount
+  };
+}
+
+async function loadAttachEmailRecords(options = {}) {
+  const loadContacts = options.loadContacts !== false;
+  const loadCandidates = options.loadCandidates !== false;
+  const contactsPage = Math.max(0, Number(options.contactsPage ?? state.attachEmail.contactsPage));
+  const candidatesPage = Math.max(
+    0,
+    Number(options.candidatesPage ?? state.attachEmail.candidatesPage)
+  );
+  const renderLoading = options.renderLoading !== false;
+
+  state.attachEmail.loading = true;
+  state.attachEmail.error = "";
+  if (renderLoading) {
+    render();
+  }
+
+  try {
+    const tasks = [];
+
+    if (loadContacts) {
+      tasks.push(
+        fetchAttachEmailRecords("contacts", {
+          page: contactsPage,
+          search: state.attachEmail.search
+        }).then((result) => ({
+          type: "contacts",
+          result
+        }))
+      );
+    }
+
+    if (loadCandidates) {
+      tasks.push(
+        fetchAttachEmailRecords("candidates", {
+          page: candidatesPage,
+          search: state.attachEmail.search
+        }).then((result) => ({
+          type: "candidates",
+          result
+        }))
+      );
+    }
+
+    const results = await Promise.allSettled(tasks);
+
+    const errors = [];
+
+    results.forEach((entry) => {
+      if (entry.status === "fulfilled") {
+        if (entry.value.type === "contacts") {
+          state.attachEmail.contacts = entry.value.result.rows;
+          state.attachEmail.contactsTotal = entry.value.result.totalCount;
+          state.attachEmail.contactsPage = contactsPage;
+          return;
+        }
+
+        if (entry.value.type === "candidates") {
+          state.attachEmail.candidates = entry.value.result.rows;
+          state.attachEmail.candidatesTotal = entry.value.result.totalCount;
+          state.attachEmail.candidatesPage = candidatesPage;
+        }
+
+        return;
+      }
+
+      if (entry.reason instanceof Error) {
+        errors.push(entry.reason.message);
+      } else if (entry.reason) {
+        errors.push(String(entry.reason));
+      }
+    });
+
+    state.attachEmail.loading = false;
+    state.attachEmail.error = errors[0] || "";
+    render();
+  } catch (error) {
+    state.attachEmail.loading = false;
+    state.attachEmail.error =
+      error instanceof Error ? error.message : "Unable to load TrackTalents records.";
+    render();
+  }
+}
+
+function openAttachEmailPanel() {
+  state.attachEmail = buildAttachEmailState();
+  state.attachEmail.open = true;
+  render();
+  void loadAttachEmailRecords({
+    loadContacts: true,
+    loadCandidates: true
+  });
+}
+
+function toggleAttachEmailSelection(type, recordId) {
+  if (!recordId) {
+    return;
+  }
+
+  const rows = getAttachEmailRows(type);
+  const selectedKey = type === "candidates" ? "selectedCandidates" : "selectedContacts";
+  const selectedRows = state.attachEmail[selectedKey];
+  const existingIndex = selectedRows.findIndex((item) => item.id === recordId);
+
+  if (existingIndex >= 0) {
+    state.attachEmail[selectedKey] = selectedRows.filter((item) => item.id !== recordId);
+  } else {
+    const nextRecord = rows.find((item) => item.id === recordId);
+    if (!nextRecord) {
+      return;
+    }
+
+    state.attachEmail[selectedKey] = [...selectedRows, nextRecord];
+  }
+
+  render();
+}
+
+function buildAttachEmailSummaryCopy() {
+  const contactCount = state.attachEmail.selectedContacts.length;
+  const candidateCount = state.attachEmail.selectedCandidates.length;
+
+  if (!contactCount && !candidateCount) {
+    return "Choose one or more contacts or candidates to prepare this email for attachment.";
+  }
+
+  return `${contactCount} contact${contactCount === 1 ? "" : "s"} and ${candidateCount} candidate${
+    candidateCount === 1 ? "" : "s"
+  } selected`;
+}
+
+function buildAttachEmailActivityNote(recordId) {
+  const item = state.currentItem || {};
+  const fromName = String(item.from?.displayName || "").trim();
+  const fromEmail = String(item.from?.email || "").trim();
+  const subject = String(item.subject || "").trim();
+  const body = String(item.bodyPreview || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1400);
+  const attachmentCount = Number(item.attachmentCount || 0);
+  const attachmentSummary =
+    attachmentCount > 0 ? `Attachments: ${attachmentCount}` : "Attachments: 0";
+  const emailSource = fromName || fromEmail
+    ? `From: ${fromName || "Unknown"}${fromEmail ? ` <${fromEmail}>` : ""}`
+    : "From: Unknown";
+
+  return [
+    "Outlook email attached from TrackTalents Outlook add-in.",
+    recordId ? `Email Add-in Record ID: ${recordId}` : "",
+    emailSource,
+    subject ? `Subject: ${subject}` : "Subject: (empty)",
+    attachmentSummary,
+    body ? `Body: ${body}` : "Body: (empty)"
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildAttachEmailSuccessMessage(contactCount, candidateCount) {
+  return `Email attached to ${contactCount} contact${contactCount === 1 ? "" : "s"} and ${candidateCount} candidate${
+    candidateCount === 1 ? "" : "s"
+  }.`;
+}
+
+async function attachEmailToTrackTalentsRecord(entityType, entityId, noteDescription, userId) {
+  const response = await fetch("/api/attach-email/link", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    },
+    body: JSON.stringify({
+      entityType,
+      entityId,
+      noteDescription,
+      userId: String(userId || "").trim()
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || `Unable to attach the email to the selected ${entityType}.`);
+  }
+
+  return payload;
+}
+
+function buildAttachEmailSummaryRows() {
+  const rows = [];
+
+  if (state.attachEmail.selectedContacts.length) {
+    rows.push({
+      label: `Contacts (${state.attachEmail.selectedContacts.length})`,
+      values: state.attachEmail.selectedContacts.map((contact) => contact.name)
+    });
+  }
+
+  if (state.attachEmail.selectedCandidates.length) {
+    rows.push({
+      label: `Candidates (${state.attachEmail.selectedCandidates.length})`,
+      values: state.attachEmail.selectedCandidates.map((candidate) => candidate.name)
+    });
+  }
+
+  return rows;
+}
+
+function renderAttachEmailSummaryRows() {
+  const rows = buildAttachEmailSummaryRows();
+  if (!rows.length) {
+    return "";
+  }
+
+  return `
+    <div class="attach-email-summary-list">
+      ${rows
+        .map(
+          (row) => `
+            <div class="attach-email-summary-item">
+              <strong>${escapeHtml(row.label)}</strong>
+              <div class="attach-email-chip-list">
+                ${row.values
+                  .map((value) => `<span class="attach-email-chip">${escapeHtml(value)}</span>`)
+                  .join("")}
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAttachEmailTable() {
+  const activeTab = state.attachEmail.activeTab;
+  const rows = getAttachEmailRows(activeTab);
+
+  if (!rows.length) {
+    return `
+      <div class="attach-email-empty-state">
+        ${escapeHtml(
+          state.attachEmail.loading
+            ? "Loading TrackTalents records..."
+            : `No ${activeTab} matched this search.`
+        )}
+      </div>
+    `;
+  }
+
+  if (activeTab === "candidates") {
+    return `
+      <div class="attach-email-table">
+        <div class="attach-email-table-head">
+          <span>Name</span>
+          <span>Email</span>
+          <span>Location</span>
+        </div>
+        <div class="attach-email-table-body">
+          ${rows
+            .map((candidate) => {
+              const selected = isAttachEmailSelected("candidates", candidate.id);
+              return `
+                <button
+                  type="button"
+                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                  data-attach-email-row-type="candidates"
+                  data-attach-email-row-id="${escapeAttribute(candidate.id)}"
+                >
+                  <span>${escapeHtml(candidate.name)}</span>
+                  <span>${escapeHtml(candidate.email || "—")}</span>
+                  <span>${escapeHtml(candidate.location || "—")}</span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="attach-email-table">
+      <div class="attach-email-table-head">
+        <span>Name</span>
+        <span>Email</span>
+        <span>Company</span>
+      </div>
+      <div class="attach-email-table-body">
+        ${rows
+          .map((contact) => {
+            const selected = isAttachEmailSelected("contacts", contact.id);
+            return `
+              <button
+                type="button"
+                class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                data-attach-email-row-type="contacts"
+                data-attach-email-row-id="${escapeAttribute(contact.id)}"
+              >
+                <span>${escapeHtml(contact.name)}</span>
+                <span>${escapeHtml(contact.email || "—")}</span>
+                <span>${escapeHtml(contact.company || "—")}</span>
+              </button>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderAttachEmailPanel() {
+  const activeTab = state.attachEmail.activeTab;
+  const currentPage = getAttachEmailCurrentPage(activeTab);
+  const pageCount = getAttachEmailPageCount(activeTab);
+  const hasSelection = getAttachEmailSelectedTotal() > 0;
+  const submitLabel = state.attachEmail.submitting ? "Attaching..." : "Attach email";
+  const searchPlaceholder =
+    activeTab === "candidates" ? "Search candidates..." : "Search contacts...";
+
+  return `
+    <div class="modal-overlay" role="presentation">
+      <section
+        class="attach-email-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attach-email-title"
+      >
+        <div class="attach-email-header">
+          <div>
+            <p class="section-label">Attach Email</p>
+            <h2 id="attach-email-title">Attach this email to TrackTalents records</h2>
+          </div>
+        </div>
+
+        <div class="attach-email-summary ${hasSelection ? "attach-email-summary-active" : ""}">
+          <div class="attach-email-summary-copy">
+            <strong>${hasSelection ? "Ready to attach" : "Select records"}</strong>
+            <span>${escapeHtml(buildAttachEmailSummaryCopy())}</span>
+          </div>
+          ${renderAttachEmailSummaryRows()}
+        </div>
+
+        ${state.attachEmail.error ? `<div class="banner banner-error">${escapeHtml(state.attachEmail.error)}</div>` : ""}
+
+        <div class="attach-email-tabs" role="tablist" aria-label="TrackTalents lists">
+          <button
+            type="button"
+            class="attach-email-tab ${activeTab === "contacts" ? "attach-email-tab-active" : ""}"
+            data-attach-email-tab="contacts"
+          >
+            Contacts
+          </button>
+          <button
+            type="button"
+            class="attach-email-tab ${activeTab === "candidates" ? "attach-email-tab-active" : ""}"
+            data-attach-email-tab="candidates"
+          >
+            Candidates
+          </button>
+        </div>
+
+        <div class="attach-email-toolbar">
+          <input
+            id="attach-email-search"
+            class="attach-email-search"
+            type="search"
+            placeholder="${escapeAttribute(searchPlaceholder)}"
+            value="${escapeAttribute(state.attachEmail.search)}"
+          />
+        </div>
+
+        ${renderAttachEmailTable()}
+
+        <div class="attach-email-footer">
+          <div class="attach-email-pager">
+            <button
+              type="button"
+              class="ghost-button attach-email-pager-button"
+              id="attach-email-prev-page"
+              ${state.attachEmail.loading || currentPage <= 0 ? "disabled" : ""}
+            >
+              Prev
+            </button>
+            <span class="attach-email-pager-copy">
+              ${escapeHtml(`${currentPage + 1} / ${pageCount}`)}
+            </span>
+            <button
+              type="button"
+              class="ghost-button attach-email-pager-button"
+              id="attach-email-next-page"
+              ${state.attachEmail.loading || currentPage + 1 >= pageCount ? "disabled" : ""}
+            >
+              Next
+            </button>
+          </div>
+
+          <div class="attach-email-footer-actions">
+            <button
+              id="cancel-attach-email-button"
+              class="ghost-button attach-email-footer-button"
+              type="button"
+              ${state.attachEmail.submitting ? "disabled" : ""}
+            >
+              Cancel
+            </button>
+            <button
+              id="submit-attach-email-button"
+              class="primary-button attach-email-footer-primary"
+              type="button"
+              ${!hasSelection || state.attachEmail.loading || state.attachEmail.submitting ? "disabled" : ""}
+            >
+              ${escapeHtml(submitLabel)}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function handleActionRequest(actionId) {
-  if (isAddCandidateAction(actionId)) {
+  if (isAttachEmailAction(actionId)) {
+    openAttachEmailPanel();
+    return;
+  }
+
+  if (isResumeImportAction(actionId)) {
     openImportModal(actionId);
     return;
   }
 
-  launchAction(actionId);
+  void handleDirectActionLaunch(actionId);
 }
 
 function buildAttachmentBadgeMarkup(count) {
@@ -423,9 +1097,7 @@ function renderImportAttachmentRow(attachment) {
     <div class="import-attachment-row">
       <div class="import-attachment-copy">
         <strong>${escapeHtml(attachment.name)}</strong>
-        <span>${escapeHtml(formatFileSize(attachment.size))}${
-          attachment.canBeResume ? " • Resume supported" : ""
-        }</span>
+        <span>${escapeHtml(formatFileSize(attachment.size))}</span>
       </div>
 
       <label class="resume-checkbox ${attachment.canBeResume ? "" : "resume-checkbox-disabled"}">
@@ -461,20 +1133,60 @@ function renderImportModal() {
   const hasAttachments = summary.totalAttachments > 0;
   const selectedResume = summary.selectedResume;
   const importDisabled = !hasAttachments || !selectedResume || state.importModal.submitting;
+  const actionId = state.importModal.actionId;
+  const actionLabel = actionLabelFromId(actionId);
   const submitLabel = state.importModal.submitting ? "Importing..." : "Import";
-  const importSummaryText = selectedResume
-    ? `1 resume and ${summary.documentCount} document${
-        summary.documentCount === 1 ? "" : "s"
-      } will be imported on submit`
+  const additionalDocumentsLabel = `${summary.documentCount} additional document${
+    summary.documentCount === 1 ? "" : "s"
+  }`;
+
+  let modalTitle = "Select the resume from this email";
+  let importSummaryText = selectedResume
+    ? `1 resume and ${additionalDocumentsLabel} will be imported`
     : "Choose one attachment as the resume before importing";
+  let emptyStateText = "No resume-supported attachments were found on this email.";
+
+  switch (actionId) {
+    case "add-job":
+      modalTitle = "Select the document to create this job";
+      importSummaryText = selectedResume
+        ? `1 document and ${additionalDocumentsLabel} will be imported into the job form`
+        : "Choose one attachment to parse into the job form before importing";
+      emptyStateText = "No resume-supported job documents were found on this email.";
+      break;
+    case "add-contact":
+      modalTitle = "Select the document to create this contact";
+      importSummaryText = selectedResume
+        ? `1 document and ${additionalDocumentsLabel} will be imported into the contact form`
+        : "Choose one attachment to parse into the contact form before importing";
+      emptyStateText = "No resume-supported contact documents were found on this email.";
+      break;
+    case "submit-resume-contact":
+      modalTitle = "Select the resume to submit to this contact";
+      importSummaryText = selectedResume
+        ? `1 resume and ${additionalDocumentsLabel} will be imported for contact submission`
+        : "Choose one attachment as the resume before submitting to the contact";
+      emptyStateText = "No resume-supported attachments were found for contact submission on this email.";
+      break;
+    case "source-resume-job":
+      modalTitle = "Select the resume to source to this job";
+      importSummaryText = selectedResume
+        ? `1 resume and ${additionalDocumentsLabel} will be imported for job sourcing`
+        : "Choose one attachment as the resume before sourcing it to the job";
+      emptyStateText = "No resume-supported attachments were found for job sourcing on this email.";
+      break;
+    case "add-candidate":
+    default:
+      break;
+  }
 
   return `
     <div class="modal-overlay" role="presentation">
       <section class="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
         <div class="import-header">
           <div>
-            <p class="section-label">Add Candidate</p>
-            <h2 id="import-title">Import attachments from this email</h2>
+            <p class="section-label">${escapeHtml(actionLabel)}</p>
+            <h2 id="import-title">${escapeHtml(modalTitle)}</h2>
           </div>
         </div>
 
@@ -496,7 +1208,7 @@ function renderImportModal() {
             ? `<div class="import-attachment-list">${state.importModal.attachments
                 .map(renderImportAttachmentRow)
                 .join("")}</div>`
-            : `<div class="import-empty-state">No supported attachments were found on this email.</div>`
+            : `<div class="import-empty-state">${escapeHtml(emptyStateText)}</div>`
         }
 
         <div class="import-footer">
@@ -568,6 +1280,7 @@ function render() {
     </main>
 
     ${state.showLoginModal ? renderLoginModal() : ""}
+    ${state.attachEmail.open ? renderAttachEmailPanel() : ""}
     ${state.importModal.open ? renderImportModal() : ""}
   `;
 
@@ -612,6 +1325,7 @@ function bindEvents() {
       state.loginError = "";
       state.loginSubmitting = false;
       state.loginForm.password = "";
+      closeAttachEmailPanel();
       closeImportModal();
       persistAuth(null);
       state.launchMessage = "You have been logged out from the TrackTalents extension.";
@@ -661,6 +1375,108 @@ function bindEvents() {
         closeImportModal();
         render();
       }
+    });
+  }
+
+  const cancelAttachEmailButton = document.getElementById("cancel-attach-email-button");
+  if (cancelAttachEmailButton) {
+    cancelAttachEmailButton.addEventListener("click", () => {
+      if (!state.attachEmail.submitting) {
+        closeAttachEmailPanel();
+        render();
+      }
+    });
+  }
+
+  const submitAttachEmailButton = document.getElementById("submit-attach-email-button");
+  if (submitAttachEmailButton) {
+    submitAttachEmailButton.addEventListener("click", handleAttachEmailSubmit);
+  }
+
+  const attachEmailSearch = document.getElementById("attach-email-search");
+  if (attachEmailSearch) {
+    attachEmailSearch.addEventListener("input", (event) => {
+      state.attachEmail.search = event.target.value;
+      state.attachEmail.contactsPage = 0;
+      state.attachEmail.candidatesPage = 0;
+      void loadAttachEmailRecords({
+        loadContacts: true,
+        loadCandidates: true,
+        contactsPage: 0,
+        candidatesPage: 0,
+        renderLoading: false
+      });
+    });
+  }
+
+  document.querySelectorAll("[data-attach-email-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tab = button.getAttribute("data-attach-email-tab");
+      if (!tab || tab === state.attachEmail.activeTab) {
+        return;
+      }
+
+      state.attachEmail.activeTab = tab === "candidates" ? "candidates" : "contacts";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-attach-email-row-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const recordId = button.getAttribute("data-attach-email-row-id");
+      const type = button.getAttribute("data-attach-email-row-type");
+
+      if (!recordId || !type || state.attachEmail.submitting) {
+        return;
+      }
+
+      toggleAttachEmailSelection(type === "candidates" ? "candidates" : "contacts", recordId);
+    });
+  });
+
+  const attachEmailPrevPage = document.getElementById("attach-email-prev-page");
+  if (attachEmailPrevPage) {
+    attachEmailPrevPage.addEventListener("click", () => {
+      const activeTab = state.attachEmail.activeTab;
+      const nextPage = Math.max(0, getAttachEmailCurrentPage(activeTab) - 1);
+
+      if (activeTab === "candidates") {
+        void loadAttachEmailRecords({
+          loadContacts: false,
+          loadCandidates: true,
+          candidatesPage: nextPage
+        });
+        return;
+      }
+
+      void loadAttachEmailRecords({
+        loadContacts: true,
+        loadCandidates: false,
+        contactsPage: nextPage
+      });
+    });
+  }
+
+  const attachEmailNextPage = document.getElementById("attach-email-next-page");
+  if (attachEmailNextPage) {
+    attachEmailNextPage.addEventListener("click", () => {
+      const activeTab = state.attachEmail.activeTab;
+      const nextPage = getAttachEmailCurrentPage(activeTab) + 1;
+
+      if (activeTab === "candidates") {
+        void loadAttachEmailRecords({
+          loadContacts: false,
+          loadCandidates: true,
+          candidatesPage: nextPage
+        });
+        return;
+      }
+
+      void loadAttachEmailRecords({
+        loadContacts: true,
+        loadCandidates: false,
+        contactsPage: nextPage
+      });
     });
   }
 
@@ -731,6 +1547,61 @@ function bindEvents() {
       handleActionRequest(actionId);
     });
   });
+}
+
+async function handleAttachEmailSubmit() {
+  const contactCount = state.attachEmail.selectedContacts.length;
+  const candidateCount = state.attachEmail.selectedCandidates.length;
+
+  if (!contactCount && !candidateCount) {
+    state.attachEmail.error = "Select at least one contact or candidate before attaching this email.";
+    render();
+    return;
+  }
+
+  state.attachEmail.submitting = true;
+  state.attachEmail.error = "";
+  render();
+
+  try {
+    const emailAddinRecord = await createEmailAddinRecord("email", {
+      body: state.currentItem?.bodyPreview || "",
+      subject: state.currentItem?.subject || "",
+      fromName: state.currentItem?.from?.displayName || "",
+      fromEmail: state.currentItem?.from?.email || "",
+      toRecipients: normalizeRecipientList(state.currentItem?.to),
+      resumes: null,
+      documents: getImportableAttachments()
+    });
+    const recordId = String(emailAddinRecord?._id || "");
+    const noteDescription = buildAttachEmailActivityNote(recordId);
+    const activityUserId = String(
+      state.auth?.userId ||
+        state.auth?.loginData?.userId ||
+        state.auth?.loginData?.UserId ||
+        ""
+    ).trim();
+
+    const attachTasks = [
+      ...state.attachEmail.selectedContacts.map((contact) =>
+        attachEmailToTrackTalentsRecord("contacts", contact.id, noteDescription, activityUserId)
+      ),
+      ...state.attachEmail.selectedCandidates.map((candidate) =>
+        attachEmailToTrackTalentsRecord("candidates", candidate.id, noteDescription, activityUserId)
+      )
+    ];
+
+    await Promise.all(attachTasks);
+
+    state.launchMessage = buildAttachEmailSuccessMessage(contactCount, candidateCount);
+    closeAttachEmailPanel();
+    render();
+  } catch (error) {
+    state.attachEmail.submitting = false;
+    state.attachEmail.error =
+      error instanceof Error ? error.message : "Unable to prepare this email for attachment.";
+    render();
+  }
 }
 
 async function handleLoginSubmit(event) {
@@ -824,6 +1695,252 @@ function buildLaunchContext(action) {
   return query.toString();
 }
 
+function buildResumeRecordEntry(attachment) {
+  if (!attachment) {
+    return null;
+  }
+
+  return {
+    FileName: String(attachment.name || ""),
+    ContentType: String(attachment.contentType || "application/octet-stream"),
+    ContentFormat: String(attachment.contentFormat || "base64"),
+    Content: String(attachment.content || ""),
+    Size: Number(attachment.size || 0),
+    Source: String(attachment.source || "email")
+  };
+}
+
+function buildResumeBridgePreview(attachment) {
+  if (!attachment) {
+    return null;
+  }
+
+  return {
+    FileName: String(attachment.name || ""),
+    ContentType: String(attachment.contentType || "application/octet-stream"),
+    Size: Number(attachment.size || 0),
+    Source: String(attachment.source || "email")
+  };
+}
+
+async function createOutlookImportSession(payload) {
+  const response = await fetch("/api/outlook-import-session", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      payload
+    })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || "Unable to prepare the Outlook import session.");
+  }
+
+  return {
+    sessionId: String(data?.sessionId || ""),
+    apiHost: window.location.origin
+  };
+}
+
+async function updateOutlookImportSession(sessionId, payload) {
+  const response = await fetch(
+    `/api/outlook-import-session/${encodeURIComponent(String(sessionId || ""))}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        payload
+      })
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || "Unable to update the Outlook import session.");
+  }
+
+  return {
+    sessionId: String(data?.sessionId || sessionId || ""),
+    apiHost: window.location.origin
+  };
+}
+
+async function parseResumeAttachment(attachment) {
+  const response = await fetch("/api/resume/parse", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    },
+    body: JSON.stringify({
+      attachment
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || "Unable to parse the selected Outlook resume.");
+  }
+
+  return payload;
+}
+
+async function prepareImportDocuments(attachments) {
+  const response = await fetch("/api/outlook-import-documents", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    },
+    body: JSON.stringify({
+      userId:
+        String(
+          state.auth?.userId ||
+            state.auth?.loginData?.userId ||
+            state.auth?.loginData?.UserId ||
+            ""
+        ),
+      attachments
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || "Unable to prepare the selected Outlook documents.");
+  }
+
+  return Array.isArray(payload?.documents) ? payload.documents : [];
+}
+
+function buildDocumentPayload(documents) {
+  if (!Array.isArray(documents) || documents.length === 0) {
+    return null;
+  }
+
+  const documentValues = documents
+    .map((document) => {
+      if (typeof document === "string") {
+        return document;
+      }
+
+      if (document && typeof document === "object") {
+        return String(document.name || document.FileName || document.DocumentName || "");
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+
+  if (documentValues.length === 0) {
+    return null;
+  }
+
+  return documentValues.length === 1 ? documentValues[0] : documentValues;
+}
+
+function buildEmailAddinRecordDebugPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    accessToken: payload.accessToken ? "[redacted]" : "",
+    resumes: Array.isArray(payload.resumes)
+      ? payload.resumes.map((resume) => ({
+          ...resume,
+          Content: resume?.Content ? `[redacted base64 length=${String(resume.Content).length}]` : ""
+        }))
+      : payload.resumes
+  };
+}
+
+function logEmailAddinRecordDebug(stage, details) {
+  const timestamp = new Date().toISOString();
+  console.groupCollapsed(`[TrackTalents][EmailAddinRecord] ${stage} ${timestamp}`);
+  console.log(details);
+  console.groupEnd();
+}
+
+function buildEmailAddinRecordRequest(type, options = {}) {
+  const item = state.currentItem || {};
+
+  return {
+    type,
+    resumes: Array.isArray(options.resumes) ? options.resumes : null,
+    documents: buildDocumentPayload(options.documents),
+    emailData: {
+      Body: String(options.body ?? item.bodyPreview ?? ""),
+      Subject: String(options.subject ?? item.subject ?? ""),
+      From: {
+        Name: String(options.fromName ?? item.from?.displayName ?? ""),
+        Email: String(options.fromEmail ?? item.from?.email ?? "")
+      },
+      To: normalizeRecipientList(options.toRecipients ?? item.to).map((recipient) => ({
+        Name: recipient.displayName,
+        Email: recipient.email
+      }))
+    }
+  };
+}
+
+async function createEmailAddinRecord(type, options = {}) {
+  const requestPayload = buildEmailAddinRecordRequest(type, options);
+  logEmailAddinRecordDebug("POST request", buildEmailAddinRecordDebugPayload(requestPayload));
+
+  const response = await fetch("/api/EmailAddinRecord", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    },
+    body: JSON.stringify(requestPayload)
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  logEmailAddinRecordDebug("POST response", {
+    ok: response.ok,
+    status: response.status,
+    payload
+  });
+
+  if (!response.ok) {
+    throw new Error(payload?.message || "Unable to create the email add-in record.");
+  }
+
+  return payload;
+}
+
+async function getEmailAddinRecord(recordId) {
+  logEmailAddinRecordDebug("GET request", { recordId });
+
+  const response = await fetch(`/api/EmailAddinRecord/${encodeURIComponent(recordId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    }
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  logEmailAddinRecordDebug("GET response", {
+    ok: response.ok,
+    status: response.status,
+    recordId,
+    payload
+  });
+
+  if (!response.ok) {
+    throw new Error(payload?.message || "Unable to load the email add-in record.");
+  }
+
+  return payload;
+}
+
 function buildAbsoluteAppUrl(pathname) {
   return new URL(pathname, `${state.config.appHost}/`).toString();
 }
@@ -840,6 +1957,25 @@ function encodeBridgePayload(value) {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
+function buildBridgeLoginData() {
+  const loginData = state.auth?.loginData || {};
+
+  return {
+    expires_in: Number(loginData.expires_in || 0),
+    userId: String(loginData.userId || state.auth?.userId || ""),
+    UserId: String(loginData.UserId || loginData.userId || state.auth?.userId || ""),
+    MId: String(loginData.MId || state.auth?.mId || ""),
+    Role: String(loginData.Role || ""),
+    Permissions: loginData.Permissions || "[]",
+    Databases: String(loginData.Databases || ""),
+    Admin: loginData.Admin ?? false,
+    OnboardingLicense: loginData.OnboardingLicense ?? false,
+    Email: String(loginData.Email || state.auth?.email || ""),
+    FirstName: String(loginData.FirstName || ""),
+    LastName: String(loginData.LastName || "")
+  };
+}
+
 function buildTargetPath(actionId) {
   const action = ACTIONS.find((entry) => entry.id === actionId);
   if (!action) {
@@ -849,22 +1985,46 @@ function buildTargetPath(actionId) {
   return `${action.path}?${buildLaunchContext(action)}`;
 }
 
-function buildAuthBridgeUrl(actionId, outlookCandidateImport) {
+function buildOutlookActionImportPayload(actionId, options = {}) {
+  return {
+    actionId,
+    source: "outlook-addin",
+    importedAt: new Date().toISOString(),
+    selectedResumeName: options.selectedResume?.FileName || "",
+    emailContext: {
+      subject: options.subject || state.currentItem?.subject || "",
+      fromName: options.fromName || state.currentItem?.from?.displayName || "",
+      fromEmail: options.fromEmail || state.currentItem?.from?.email || "",
+      bodyPreview: options.bodyPreview || state.currentItem?.bodyPreview || ""
+    },
+    parsedResumeData: options.parsedResumeData || null,
+    resumes: Array.isArray(options.resumes) ? options.resumes : [],
+    documents: Array.isArray(options.documents) ? options.documents : [],
+    emailAddinRecord: options.emailAddinRecord || null,
+    selectedResume: options.selectedResume || null
+  };
+}
+
+function buildAuthBridgeUrl(actionId, bridgeData = {}) {
   const redirectTo = buildTargetPath(actionId);
-  const loginExpirySeconds = Number(state.auth?.loginData?.expires_in || 0);
+  const bridgeLoginData = buildBridgeLoginData();
+  const loginExpirySeconds = Number(bridgeLoginData.expires_in || 0);
   const fallbackExpiration =
     loginExpirySeconds > 0 ? Date.now() + loginExpirySeconds * 1000 : Date.now() + 60 * 60 * 1000;
   const tokenExpiration = Number(state.auth?.tokenExpiration || 0) || fallbackExpiration;
   const payload = encodeBridgePayload({
     accessToken: state.auth?.accessToken || "",
-    refreshToken: state.auth?.refreshToken || "",
     tokenType: state.auth?.tokenType || "Bearer",
     tokenExpiration,
     email: state.auth?.email || "",
-    userId: state.auth?.userId || state.auth?.loginData?.userId || state.auth?.loginData?.UserId || "",
-    mId: state.auth?.mId || state.auth?.loginData?.MId || "",
-    loginData: state.auth?.loginData || {},
-    outlookCandidateImport: outlookCandidateImport || null
+    userId: state.auth?.userId || bridgeLoginData.userId || bridgeLoginData.UserId || "",
+    mId: state.auth?.mId || bridgeLoginData.MId || "",
+    loginData: bridgeLoginData,
+    outlookCandidateImport: bridgeData.outlookCandidateImport || null,
+    outlookImportSessionId: bridgeData.outlookImportSessionId || "",
+    outlookImportApiHost: bridgeData.outlookImportApiHost || "",
+    emailAddinRecord: bridgeData.emailAddinRecord || null,
+    selectedResume: bridgeData.selectedResume || null
   });
   const hash = new URLSearchParams({
     payload,
@@ -872,6 +2032,23 @@ function buildAuthBridgeUrl(actionId, outlookCandidateImport) {
   });
 
   return `${buildAbsoluteAppUrl(state.config.authBridgePath)}#${hash.toString()}`;
+}
+
+function createPendingImportLaunch(actionId) {
+  const sessionId =
+    typeof window.crypto?.randomUUID === "function"
+      ? window.crypto.randomUUID()
+      : `outlook-import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  launchAction(actionId, {
+    outlookImportSessionId: sessionId,
+    outlookImportApiHost: window.location.origin
+  });
+
+  return {
+    sessionId,
+    apiHost: window.location.origin
+  };
 }
 
 function safeOpenWindow(url) {
@@ -885,16 +2062,93 @@ function safeOpenWindow(url) {
 
 function launchAction(actionId, options = {}) {
   try {
-    const url = buildAuthBridgeUrl(actionId, options.outlookCandidateImport);
+    const url = buildAuthBridgeUrl(actionId, {
+      outlookCandidateImport: options.outlookCandidateImport,
+      outlookImportSessionId: options.outlookImportSessionId,
+      outlookImportApiHost: options.outlookImportApiHost,
+      emailAddinRecord: options.emailAddinRecord,
+      selectedResume: options.selectedResume
+    });
     safeOpenWindow(url);
     state.launchMessage =
       options.successMessage || `${actionLabelFromId(actionId)} opened in a separate tab.`;
     state.showLoginModal = false;
+    closeAttachEmailPanel();
     closeImportModal();
     render();
   } catch (error) {
     state.launchMessage = "";
     state.loginError = error instanceof Error ? error.message : "Unable to open TrackTalents.";
+    render();
+  }
+}
+
+async function handleDirectActionLaunch(actionId) {
+  if (!state.auth?.accessToken) {
+    state.loginError = "Your TrackTalents session expired. Please sign in again.";
+    render();
+    return;
+  }
+
+  const pendingLaunch = createPendingImportLaunch(actionId);
+
+  try {
+    logEmailAddinRecordDebug("Submit start", {
+      actionId,
+      itemId: state.currentItem?.itemId || "",
+      subject: state.currentItem?.subject || "",
+      step: "create-email-addin-record"
+    });
+
+    const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
+      body: state.currentItem?.bodyPreview || "",
+      subject: state.currentItem?.subject || "",
+      fromName: state.currentItem?.from?.displayName || "",
+      fromEmail: state.currentItem?.from?.email || "",
+      toRecipients: normalizeRecipientList(state.currentItem?.to),
+      resumes: null,
+      documents: getImportableAttachments()
+    });
+
+    logEmailAddinRecordDebug("Email add-in record created", {
+      actionId,
+      recordId: String(payload?._id || ""),
+      step: "load-email-addin-record"
+    });
+
+    const recordId = String(payload?._id || "");
+    const emailAddinRecord = recordId ? await getEmailAddinRecord(recordId) : payload;
+    const outlookActionImport = buildOutlookActionImportPayload(actionId, {
+      emailAddinRecord: {
+        ...emailAddinRecord,
+        _id: recordId || emailAddinRecord?._id || "",
+        Type: String(emailAddinRecord?.Type || getEmailAddinRecordType(actionId))
+      }
+    });
+
+    const importSession = await updateOutlookImportSession(
+      pendingLaunch.sessionId,
+      outlookActionImport
+    );
+
+    logEmailAddinRecordDebug("Outlook import session created", {
+      actionId,
+      sessionId: importSession.sessionId,
+      step: "launch-action"
+    });
+
+    state.launchMessage = buildActionSuccessMessage(actionId);
+    state.showLoginModal = false;
+    closeImportModal();
+    render();
+  } catch (error) {
+    logEmailAddinRecordDebug("Submit error", {
+      actionId,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    state.launchMessage = "";
+    state.loginError =
+      error instanceof Error ? error.message : "Unable to open the TrackTalents action.";
     render();
   }
 }
@@ -960,8 +2214,12 @@ function readOfficeAttachmentContent(attachmentId) {
 }
 
 async function handleImportSubmit() {
+  const actionId = state.importModal.actionId || "add-candidate";
   const summary = getImportSummary();
   const selectedResume = summary.selectedResume;
+  const documentAttachments = state.importModal.attachments.filter(
+    (attachment) => attachment.id !== state.importModal.resumeAttachmentId
+  );
 
   if (!selectedResume) {
     state.importModal.error = "Select one attachment as the resume before importing.";
@@ -979,44 +2237,97 @@ async function handleImportSubmit() {
   state.importModal.error = "";
   render();
 
+  const pendingLaunch = createPendingImportLaunch(actionId);
+
   try {
-    const attachments = await Promise.all(
-      state.importModal.attachments.map(resolveAttachmentForImport)
+    logEmailAddinRecordDebug("Submit start", {
+      actionId,
+      itemId: state.currentItem?.itemId || "",
+      subject: state.currentItem?.subject || "",
+      selectedResume: buildResumeBridgePreview(selectedResume),
+      step: "resolve-attachment"
+    });
+
+    const resolvedSelectedResume = await resolveAttachmentForImport(selectedResume);
+    logEmailAddinRecordDebug("Attachment resolved", {
+      fileName: resolvedSelectedResume?.name || "",
+      contentType: resolvedSelectedResume?.contentType || "",
+      size: Number(resolvedSelectedResume?.size || 0),
+      step: "parse-resume"
+    });
+
+    const parsedResumeData = await parseResumeAttachment(resolvedSelectedResume);
+    logEmailAddinRecordDebug("Resume parsed", {
+      fileName: resolvedSelectedResume?.name || "",
+      hasParsedData: Boolean(parsedResumeData),
+      parsedFirstName: String(parsedResumeData?.FirstName || ""),
+      parsedLastName: String(parsedResumeData?.LastName || ""),
+      step: "create-email-addin-record"
+    });
+    const resolvedDocumentAttachments = await Promise.all(
+      documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
     );
-    const response = await fetch("/api/candidate/import-from-email", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
+    const importedDocuments = await prepareImportDocuments(resolvedDocumentAttachments);
+    logEmailAddinRecordDebug("Documents prepared", {
+      count: importedDocuments.length,
+      names: importedDocuments.map((document) => document?.DocumentName || "").filter(Boolean),
+      step: "create-email-addin-record"
+    });
+
+    const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
+      body: state.currentItem?.bodyPreview || "",
+      subject: state.currentItem?.subject || "",
+      fromName: state.currentItem?.from?.displayName || "",
+      fromEmail: state.currentItem?.from?.email || "",
+      toRecipients: normalizeRecipientList(state.currentItem?.to),
+      resumes: null,
+      documents: documentAttachments
+    });
+    logEmailAddinRecordDebug("Email add-in record created", {
+      recordId: String(payload?._id || ""),
+      step: "load-email-addin-record"
+    });
+
+    const recordId = String(payload?._id || "");
+    const emailAddinRecord = recordId ? await getEmailAddinRecord(recordId) : payload;
+    logEmailAddinRecordDebug("Email add-in record loaded", {
+      recordId,
+      step: "create-outlook-import-session"
+    });
+    const resumePreview = buildResumeBridgePreview(resolvedSelectedResume);
+    const outlookCandidateImport = buildOutlookActionImportPayload(actionId, {
+      parsedResumeData: parsedResumeData || null,
+      resumes: Array.isArray(parsedResumeData?.Resumes) ? parsedResumeData.Resumes : [],
+      documents: importedDocuments,
+      emailAddinRecord: {
+        ...emailAddinRecord,
+        _id: recordId || emailAddinRecord?._id || "",
+        Type: String(emailAddinRecord?.Type || getEmailAddinRecordType(actionId))
       },
-      body: JSON.stringify({
-        accessToken: state.auth.accessToken,
-        userId:
-          state.auth.userId || state.auth.loginData?.userId || state.auth.loginData?.UserId || "",
-        selectedResumeId: selectedResume.id,
-        previewMode: state.currentItem?.mode === "preview",
-        emailContext: {
-          subject: state.currentItem?.subject || "",
-          fromName: state.currentItem?.from?.displayName || "",
-          fromEmail: state.currentItem?.from?.email || "",
-          bodyPreview: state.currentItem?.bodyPreview || ""
-        },
-        attachments
-      })
+      selectedResume: resumePreview
+    });
+    const importSession = await updateOutlookImportSession(
+      pendingLaunch.sessionId,
+      outlookCandidateImport
+    );
+    logEmailAddinRecordDebug("Outlook import session created", {
+      sessionId: importSession.sessionId,
+      step: "launch-action"
     });
 
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(payload?.message || "Unable to import the selected attachments.");
-    }
-
-    launchAction(state.importModal.actionId || "add-candidate", {
-      outlookCandidateImport: payload,
-      successMessage: `Add Candidate opened with ${selectedResume.name} selected as the resume.`
+    state.launchMessage = buildActionSuccessMessage(actionId, {
+      fileName: resolvedSelectedResume.name
     });
+    state.showLoginModal = false;
+    closeImportModal();
+    render();
   } catch (error) {
+    logEmailAddinRecordDebug("Submit error", {
+      message: error instanceof Error ? error.message : String(error)
+    });
     state.importModal.submitting = false;
     state.importModal.error =
-      error instanceof Error ? error.message : "Unable to import the selected attachments.";
+      error instanceof Error ? error.message : "Unable to save the email add-in record.";
     render();
   }
 }
@@ -1059,6 +2370,7 @@ function setItemStateFromOffice(item) {
   const fromDisplay = item.from?.emailAddress
     ? `${item.from.displayName || "Unknown"} <${item.from.emailAddress}>`
     : "Unavailable in this mode";
+  const toRecipients = normalizeRecipientList(item.to);
 
   state.currentItem = {
     itemId: item.itemId || item.internetMessageId || "",
@@ -1069,8 +2381,9 @@ function setItemStateFromOffice(item) {
           email: item.from.emailAddress || ""
         }
       : { displayName: "", email: "" },
+    to: toRecipients,
     fromDisplay,
-    toCount: Array.isArray(item.to) ? item.to.length : 0,
+    toCount: toRecipients.length,
     attachments,
     attachmentCount: attachmentNames.length,
     attachmentNames,
@@ -1107,6 +2420,7 @@ function readCurrentItem() {
       itemId: "",
       subject: "",
       from: { displayName: "", email: "" },
+      to: [],
       fromDisplay: "No message selected",
       toCount: 0,
       attachments: [],
