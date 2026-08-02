@@ -1,21 +1,21 @@
 :root {
   color-scheme: light;
-  --page: #f5f1ff;
-  --surface: rgba(255, 255, 255, 0.96);
+  --page: #f7f3ff;
+  --surface: rgba(255, 255, 255, 0.98);
   --surface-strong: #ffffff;
-  --surface-soft: #fbf9ff;
-  --line: rgba(109, 65, 198, 0.16);
-  --line-strong: rgba(109, 65, 198, 0.26);
+  --surface-soft: #fcfaff;
+  --line: rgba(109, 65, 198, 0.12);
+  --line-strong: rgba(109, 65, 198, 0.2);
   --text: #181d27;
   --muted: #5f6b7a;
-  --accent: #905bff;
+  --accent: #8d59ff;
   --accent-deep: #6941c6;
-  --accent-soft: #f3ecff;
+  --accent-soft: #f4efff;
   --success: #0f8a54;
   --success-soft: #e7f7ef;
   --danger: #c94242;
   --danger-soft: #fde8e8;
-  --shadow: 0 18px 44px rgba(51, 36, 97, 0.12);
+  --shadow: 0 16px 40px rgba(51, 36, 97, 0.1);
   --ui-font-family: "Sofia Pro", "Avenir Next", "Segoe UI", sans-serif;
   --ui-copy-size: 13px;
   --ui-heading-size: 16px;
@@ -39,8 +39,8 @@ body {
   font-size: var(--ui-copy-size);
   color: var(--text);
   background:
-    radial-gradient(circle at top right, rgba(144, 91, 255, 0.2), transparent 34%),
-    linear-gradient(180deg, #fcfbff 0%, var(--page) 100%);
+    radial-gradient(circle at top right, rgba(141, 89, 255, 0.16), transparent 30%),
+    linear-gradient(180deg, #fdfcff 0%, var(--page) 100%);
 }
 
 button,
@@ -54,30 +54,41 @@ input {
 
 .shell {
   height: 100vh;
-  padding: 10px;
+  padding: 0;
 }
 
 .main-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: calc(100vh - 20px);
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(248, 243, 255, 0.8) 0%, rgba(255, 255, 255, 0.98) 34%);
   overflow: hidden;
 }
 
 .hero-strip {
   padding: 12px 12px 0;
   background:
-    radial-gradient(circle at top right, rgba(122, 80, 214, 0.12), transparent 34%),
-    linear-gradient(145deg, #ffffff 0%, #f6f2ff 52%, #eef6ff 100%);
+    linear-gradient(180deg, rgba(243, 237, 255, 0.9) 0%, rgba(250, 247, 255, 0.55) 100%);
   color: var(--text);
 }
 
+.hero-card {
+  border: 1px solid rgba(141, 89, 255, 0.14);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(141, 89, 255, 0.14), transparent 34%),
+    linear-gradient(132deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 241, 255, 0.92) 62%, rgba(239, 246, 255, 0.88) 100%);
+  box-shadow:
+    0 10px 28px rgba(57, 38, 110, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
 .hero-top,
+.welcome-note,
 .actions-head,
 .login-header,
 .login-actions {
@@ -89,12 +100,13 @@ input {
 
 .hero-top {
   align-items: center;
+  padding: 14px 16px 12px;
 }
 
 .brand-lockup {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   flex: 1;
   min-width: 0;
 }
@@ -108,13 +120,13 @@ input {
 }
 
 .brand-mark {
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   padding: 6px;
   background: #ffffff;
-  border: 1px solid rgba(105, 65, 198, 0.14);
+  border: 1px solid rgba(105, 65, 198, 0.1);
   box-shadow:
-    0 10px 24px rgba(67, 41, 133, 0.08),
+    0 8px 20px rgba(67, 41, 133, 0.07),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
@@ -148,7 +160,7 @@ input {
 
 .hero-strip h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
   color: #31204f;
 }
 
@@ -167,22 +179,22 @@ input {
 
 .hero-copy {
   color: #5b6270;
-  margin-top: 3px;
+  margin-top: 2px;
+  max-width: 410px;
 }
 
 .welcome-note {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-top: 4px;
-  border-top: 1px solid rgba(105, 65, 198, 0.1);
-  padding-top: 6px;
+  margin-top: 0;
+  border-top: 1px solid rgba(105, 65, 198, 0.08);
+  padding: 10px 16px 12px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), rgba(141, 89, 255, 0.05));
 }
 
 .welcome-copy {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: #31204f;
 }
@@ -190,12 +202,12 @@ input {
 .welcome-tag {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
+  min-height: 22px;
   border-radius: 999px;
   padding: 0 10px;
-  background: rgba(144, 91, 255, 0.1);
+  background: linear-gradient(180deg, rgba(144, 91, 255, 0.14), rgba(144, 91, 255, 0.08));
   color: var(--accent-deep);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -210,8 +222,21 @@ input {
   padding: 0 12px 12px;
 }
 
+.actions-surface {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid rgba(141, 89, 255, 0.1);
+  border-radius: 18px 18px 24px 24px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 32px rgba(55, 37, 108, 0.05);
+  padding: 10px 10px 12px;
+}
+
 .actions-head {
   margin-bottom: 8px;
+  padding: 2px 2px 0;
 }
 
 .status-stack {
@@ -225,13 +250,13 @@ input {
   display: grid;
   grid-template-columns: 1fr;
   align-content: start;
-  gap: 7px;
+  gap: 10px;
   flex: 1;
 }
 
 .action-button {
-  --button-tint: rgba(144, 91, 255, 0.12);
-  --button-glow: rgba(144, 91, 255, 0.18);
+  --button-tint: rgba(144, 91, 255, 0.09);
+  --button-glow: rgba(144, 91, 255, 0.12);
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -240,16 +265,17 @@ input {
   justify-content: flex-start;
   gap: 12px;
   width: 100%;
-  min-height: 50px;
-  border: 1px solid rgba(105, 65, 198, 0.16);
-  border-radius: 16px;
-  padding: 8px 10px;
-  background: #fff;
+  min-height: 54px;
+  border: 1px solid rgba(129, 104, 204, 0.13);
+  border-radius: 18px;
+  padding: 9px 12px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.98) 76%, rgba(248, 244, 255, 0.98) 100%);
   color: inherit;
   text-align: left;
   cursor: pointer;
   box-shadow:
-    0 8px 18px rgba(36, 24, 78, 0.05),
+    0 6px 16px rgba(36, 24, 78, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transition:
     transform 140ms ease,
@@ -266,36 +292,36 @@ input {
 }
 
 .action-button::before {
-  inset: auto -14px -28px auto;
-  width: 56px;
-  height: 56px;
+  inset: auto -8px -18px auto;
+  width: 68px;
+  height: 68px;
   border-radius: 999px;
   background: radial-gradient(circle, var(--button-glow) 0%, rgba(144, 91, 255, 0) 72%);
   z-index: -1;
 }
 
 .action-button::after {
-  right: 10px;
-  bottom: 6px;
-  width: 28px;
-  height: 28px;
+  right: 14px;
+  bottom: 10px;
+  width: 26px;
+  height: 26px;
   background-image: var(--action-watermark);
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
-  opacity: 0.12;
-  filter: saturate(0.9) blur(0.15px);
+  opacity: 0.13;
+  filter: saturate(0.85) blur(0.1px);
   transform: rotate(-8deg);
 }
 
 .action-button:hover {
   background:
-    linear-gradient(180deg, #ffffff 0%, #faf7ff 100%);
-  border-color: rgba(105, 65, 198, 0.22);
+    linear-gradient(90deg, rgba(255, 255, 255, 1) 0%, rgba(250, 247, 255, 0.98) 78%, rgba(244, 238, 255, 0.98) 100%);
+  border-color: rgba(105, 65, 198, 0.2);
   box-shadow:
-    0 12px 24px rgba(65, 42, 128, 0.1),
+    0 10px 22px rgba(65, 42, 128, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.86);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .action-button:hover::after {
@@ -310,35 +336,35 @@ input {
 }
 
 .action-button:nth-child(2n) {
-  --button-tint: rgba(88, 134, 255, 0.12);
-  --button-glow: rgba(88, 134, 255, 0.2);
+  --button-tint: rgba(88, 134, 255, 0.1);
+  --button-glow: rgba(88, 134, 255, 0.14);
 }
 
 .action-button:nth-child(3n) {
-  --button-tint: rgba(76, 176, 144, 0.12);
-  --button-glow: rgba(76, 176, 144, 0.2);
+  --button-tint: rgba(104, 199, 148, 0.1);
+  --button-glow: rgba(104, 199, 148, 0.14);
 }
 
 .action-button:nth-child(4n) {
-  --button-tint: rgba(245, 164, 78, 0.14);
-  --button-glow: rgba(245, 164, 78, 0.2);
+  --button-tint: rgba(245, 164, 78, 0.11);
+  --button-glow: rgba(245, 164, 78, 0.16);
 }
 
 .action-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  border-radius: 11px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 13px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.74)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.78)),
     var(--button-tint);
   border: 1px solid rgba(105, 65, 198, 0.08);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    0 6px 14px rgba(48, 33, 90, 0.07);
+    0 5px 12px rgba(48, 33, 90, 0.05);
 }
 
 .action-icon-image {
@@ -351,7 +377,7 @@ input {
 .action-copy {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-width: 0;
   flex: 1;
 }
@@ -359,12 +385,10 @@ input {
 .action-copy strong {
   max-width: 100%;
   font-size: 11.5px;
-  line-height: 1;
+  line-height: 1.2;
   font-weight: 700;
   color: #2b1e47;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: left;
 }
 
 .action-button:focus-visible {
@@ -407,19 +431,19 @@ input {
 
 .ghost-button,
 .primary-button {
-  min-height: 36px;
-  border-radius: 12px;
-  padding: 0 12px;
+  min-height: 34px;
+  border-radius: 14px;
+  padding: 0 14px;
   font-weight: 700;
-  font-size: var(--ui-copy-size);
+  font-size: 12px;
   font-family: var(--ui-font-family);
 }
 
 .ghost-button {
   background: #ffffff;
   color: var(--accent-deep);
-  border: 1px solid rgba(105, 65, 198, 0.16);
-  box-shadow: 0 8px 18px rgba(67, 41, 133, 0.08);
+  border: 1px solid rgba(105, 65, 198, 0.12);
+  box-shadow: 0 6px 14px rgba(67, 41, 133, 0.06);
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -441,7 +465,7 @@ input {
 .icon-button {
   width: 32px;
   height: 32px;
-  background: #f5f0ff;
+  background: #f6f1ff;
   color: var(--accent-deep);
   font-weight: 700;
 }
@@ -980,12 +1004,12 @@ input {
 
 @media (max-width: 640px) {
   .shell {
-    padding: 8px;
+    padding: 0;
   }
 
   .main-card,
   .login-dialog {
-    border-radius: 20px;
+    border-radius: 0;
   }
 
   .actions-head,
@@ -997,6 +1021,7 @@ input {
   .hero-top {
     flex-direction: row;
     align-items: center;
+    padding: 12px;
   }
 
   .brand-lockup {
@@ -1006,6 +1031,7 @@ input {
   .welcome-note {
     align-items: flex-start;
     gap: 6px;
+    padding: 10px 12px 12px;
   }
 
   .action-list {
@@ -1015,6 +1041,11 @@ input {
   .modal-overlay {
     align-items: center;
     padding: 12px;
+  }
+
+  .actions-surface {
+    border-radius: 18px 18px 22px 22px;
+    padding: 10px;
   }
 
   .import-dialog {

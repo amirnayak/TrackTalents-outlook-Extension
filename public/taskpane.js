@@ -22,7 +22,7 @@ const ACTIONS = [
   },
   {
     id: "attach-email",
-    label: "Attach Email",
+    label: "Linked Emails",
     iconSrc: "/assets/action-icons/attach-email.svg",
     path: "/sentmails",
     intent: "attach-email"
@@ -190,6 +190,8 @@ function buildPreviewItem() {
     primaryResumeName: resumeNames[0] || "",
     bodyPreview:
       "Hello team, please find my latest resume attached for the senior Java developer role. I have 7 years of backend and cloud experience.",
+    bodyHtml:
+      "<p>Hello team,</p><p>Please find my latest resume attached for the senior Java developer role. I have <strong>7 years</strong> of backend and cloud experience.</p>",
     mode: "preview"
   };
 }
@@ -741,12 +743,18 @@ function buildAttachEmailActivityNote(recordId) {
 }
 
 function buildAttachEmailSuccessMessage(contactCount, candidateCount) {
-  return `Email attached to ${contactCount} contact${contactCount === 1 ? "" : "s"} and ${candidateCount} candidate${
+  return `Email linked to ${contactCount} contact${contactCount === 1 ? "" : "s"} and ${candidateCount} candidate${
     candidateCount === 1 ? "" : "s"
   }.`;
 }
 
-async function attachEmailToTrackTalentsRecord(entityType, entityId, noteDescription, userId) {
+async function attachEmailToTrackTalentsRecord(
+  entityType,
+  entityId,
+  noteDescription,
+  userId,
+  documents = []
+) {
   const response = await fetch("/api/attach-email/link", {
     method: "POST",
     headers: {
@@ -757,13 +765,14 @@ async function attachEmailToTrackTalentsRecord(entityType, entityId, noteDescrip
       entityType,
       entityId,
       noteDescription,
-      userId: String(userId || "").trim()
+      userId: String(userId || "").trim(),
+      documents: Array.isArray(documents) ? documents : []
     })
   });
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.message || `Unable to attach the email to the selected ${entityType}.`);
+    throw new Error(payload?.message || `Unable to link the email to the selected ${entityType}.`);
   }
 
   return payload;
@@ -897,7 +906,7 @@ function renderAttachEmailPanel() {
   const currentPage = getAttachEmailCurrentPage(activeTab);
   const pageCount = getAttachEmailPageCount(activeTab);
   const hasSelection = getAttachEmailSelectedTotal() > 0;
-  const submitLabel = state.attachEmail.submitting ? "Attaching..." : "Attach email";
+  const submitLabel = state.attachEmail.submitting ? "Linking..." : "Link Email";
   const searchPlaceholder =
     activeTab === "candidates" ? "Search candidates..." : "Search contacts...";
 
@@ -911,14 +920,14 @@ function renderAttachEmailPanel() {
       >
         <div class="attach-email-header">
           <div>
-            <p class="section-label">Attach Email</p>
-            <h2 id="attach-email-title">Attach this email to TrackTalents records</h2>
+            <p class="section-label">Linked Emails</p>
+            <h2 id="attach-email-title">Link this email to TrackTalents records</h2>
           </div>
         </div>
 
         <div class="attach-email-summary ${hasSelection ? "attach-email-summary-active" : ""}">
           <div class="attach-email-summary-copy">
-            <strong>${hasSelection ? "Ready to attach" : "Select records"}</strong>
+            <strong>${hasSelection ? "Ready to link" : "Select records"}</strong>
             <span>${escapeHtml(buildAttachEmailSummaryCopy())}</span>
           </div>
           ${renderAttachEmailSummaryRows()}
@@ -1245,20 +1254,22 @@ function render() {
     <main class="shell">
       <section class="main-card">
         <div class="hero-strip">
-          <div class="hero-top">
-            <div class="brand-lockup">
-              <div class="brand-mark">
-                <img src="/assets/track-talents-profile.png" alt="TrackTalents" class="brand-mark-image" />
+          <div class="hero-card">
+            <div class="hero-top">
+              <div class="brand-lockup">
+                <div class="brand-mark">
+                  <img src="/assets/track-talents-profile.png" alt="TrackTalents" class="brand-mark-image" />
+                </div>
+                <div>
+                  <h1>TrackTalents Outlook</h1>
+                  <p class="hero-copy">TrackTalents Outlook will add Candidates, Clients, Job etc directly from your email into TrackTalents ATS</p>
+                </div>
               </div>
-              <div>
-                <h1>TrackTalents Outlook</h1>
-                <p class="hero-copy">TrackTalents Outlook will add Candidates, Clients, Job etc directly from your email into TrackTalents ATS</p>
-              </div>
+              <button id="${authButtonId}" class="ghost-button" type="button">${authLabel}</button>
             </div>
-            <button id="${authButtonId}" class="ghost-button" type="button">${authLabel}</button>
-          </div>
 
-          ${renderWelcomeNote()}
+            ${renderWelcomeNote()}
+          </div>
         </div>
 
         ${
@@ -1268,12 +1279,14 @@ function render() {
         }
 
         <div class="actions-frame">
-          <div class="actions-head">
-            <p class="section-label">Quick Actions</p>
-          </div>
+          <div class="actions-surface">
+            <div class="actions-head">
+              <p class="section-label">Quick Actions</p>
+            </div>
 
-          <div class="action-list">
-            ${ACTIONS.map(renderActionButton).join("")}
+            <div class="action-list">
+              ${ACTIONS.map(renderActionButton).join("")}
+            </div>
           </div>
         </div>
       </section>
@@ -1564,14 +1577,16 @@ async function handleAttachEmailSubmit() {
   render();
 
   try {
+    const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
     const emailAddinRecord = await createEmailAddinRecord("email", {
       body: state.currentItem?.bodyPreview || "",
+      bodyHtml: state.currentItem?.bodyHtml || "",
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
       toRecipients: normalizeRecipientList(state.currentItem?.to),
       resumes: null,
-      documents: getImportableAttachments()
+      documents: importedDocuments
     });
     const recordId = String(emailAddinRecord?._id || "");
     const noteDescription = buildAttachEmailActivityNote(recordId);
@@ -1584,10 +1599,22 @@ async function handleAttachEmailSubmit() {
 
     const attachTasks = [
       ...state.attachEmail.selectedContacts.map((contact) =>
-        attachEmailToTrackTalentsRecord("contacts", contact.id, noteDescription, activityUserId)
+        attachEmailToTrackTalentsRecord(
+          "contacts",
+          contact.id,
+          noteDescription,
+          activityUserId,
+          importedDocuments
+        )
       ),
       ...state.attachEmail.selectedCandidates.map((candidate) =>
-        attachEmailToTrackTalentsRecord("candidates", candidate.id, noteDescription, activityUserId)
+        attachEmailToTrackTalentsRecord(
+          "candidates",
+          candidate.id,
+          noteDescription,
+          activityUserId,
+          importedDocuments
+        )
       )
     ];
 
@@ -1825,14 +1852,15 @@ function buildDocumentPayload(documents) {
   const documentValues = documents
     .map((document) => {
       if (typeof document === "string") {
-        return document;
+        const value = String(document).trim();
+        return value || null;
       }
 
       if (document && typeof document === "object") {
-        return String(document.name || document.FileName || document.DocumentName || "");
+        return document;
       }
 
-      return "";
+      return null;
     })
     .filter(Boolean);
 
@@ -1840,7 +1868,7 @@ function buildDocumentPayload(documents) {
     return null;
   }
 
-  return documentValues.length === 1 ? documentValues[0] : documentValues;
+  return documentValues;
 }
 
 function buildEmailAddinRecordDebugPayload(payload) {
@@ -1850,6 +1878,15 @@ function buildEmailAddinRecordDebugPayload(payload) {
 
   return {
     ...payload,
+    emailData:
+      payload.emailData && typeof payload.emailData === "object"
+        ? {
+            ...payload.emailData,
+            BodyHtml: payload.emailData.BodyHtml
+              ? `[redacted html length=${String(payload.emailData.BodyHtml).length}]`
+              : ""
+          }
+        : payload.emailData,
     accessToken: payload.accessToken ? "[redacted]" : "",
     resumes: Array.isArray(payload.resumes)
       ? payload.resumes.map((resume) => ({
@@ -1876,6 +1913,7 @@ function buildEmailAddinRecordRequest(type, options = {}) {
     documents: buildDocumentPayload(options.documents),
     emailData: {
       Body: String(options.body ?? item.bodyPreview ?? ""),
+      BodyHtml: String(options.bodyHtml ?? item.bodyHtml ?? ""),
       Subject: String(options.subject ?? item.subject ?? ""),
       From: {
         Name: String(options.fromName ?? item.from?.displayName ?? ""),
@@ -2093,6 +2131,7 @@ async function handleDirectActionLaunch(actionId) {
   const pendingLaunch = createPendingImportLaunch(actionId);
 
   try {
+    const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -2100,14 +2139,22 @@ async function handleDirectActionLaunch(actionId) {
       step: "create-email-addin-record"
     });
 
+    logEmailAddinRecordDebug("Documents prepared", {
+      actionId,
+      count: importedDocuments.length,
+      names: importedDocuments.map((document) => document?.DocumentName || "").filter(Boolean),
+      step: "create-email-addin-record"
+    });
+
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
       body: state.currentItem?.bodyPreview || "",
+      bodyHtml: state.currentItem?.bodyHtml || "",
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
       toRecipients: normalizeRecipientList(state.currentItem?.to),
       resumes: null,
-      documents: getImportableAttachments()
+      documents: importedDocuments
     });
 
     logEmailAddinRecordDebug("Email add-in record created", {
@@ -2174,6 +2221,19 @@ async function resolveAttachmentForImport(attachment) {
     contentFormat: normalizeAttachmentContentFormat(contentResult.format),
     content: String(contentResult.content || "")
   };
+}
+
+async function prepareEmailAddinDocuments(attachments) {
+  const documentAttachments = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+  if (documentAttachments.length === 0) {
+    return [];
+  }
+
+  const resolvedAttachments = await Promise.all(
+    documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
+  );
+
+  return prepareImportDocuments(resolvedAttachments);
 }
 
 function utf8TextToBase64(value) {
@@ -2276,12 +2336,13 @@ async function handleImportSubmit() {
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
       body: state.currentItem?.bodyPreview || "",
+      bodyHtml: state.currentItem?.bodyHtml || "",
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
       toRecipients: normalizeRecipientList(state.currentItem?.to),
       resumes: null,
-      documents: documentAttachments
+      documents: importedDocuments
     });
     logEmailAddinRecordDebug("Email add-in record created", {
       recordId: String(payload?._id || ""),
@@ -2390,6 +2451,7 @@ function setItemStateFromOffice(item) {
     hasResumeAttachment: resumeNames.length > 0,
     primaryResumeName: resumeNames[0] || "",
     bodyPreview: "",
+    bodyHtml: "",
     mode: "outlook"
   };
 
@@ -2397,9 +2459,16 @@ function setItemStateFromOffice(item) {
     item.body.getAsync(Office.CoercionType.Text, (result) => {
       if (result.status === Office.AsyncResultStatus.Succeeded && state.currentItem) {
         state.currentItem.bodyPreview = String(result.value || "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, 420);
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          .trim();
+        render();
+      }
+    });
+
+    item.body.getAsync(Office.CoercionType.Html, (result) => {
+      if (result.status === Office.AsyncResultStatus.Succeeded && state.currentItem) {
+        state.currentItem.bodyHtml = String(result.value || "").trim();
         render();
       }
     });
@@ -2429,6 +2498,7 @@ function readCurrentItem() {
       hasResumeAttachment: false,
       primaryResumeName: "",
       bodyPreview: "",
+      bodyHtml: "",
       mode: "outlook"
     };
     render();

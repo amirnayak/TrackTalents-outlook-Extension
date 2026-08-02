@@ -16,6 +16,7 @@ const OUTLOOK_IMPORT_SESSION_TTL_MS = 15 * 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000);
 const app = express();
 const outlookImportSessions = new Map();
+const emailAddinRecordCache = new Map();
 
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -133,13 +134,25 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
   }
 
   try {
+    const requestPayload = buildEmailAddinRecordPayload(emailData, type, resumes, documents);
+    const backendPayload = buildEmailAddinRecordPayload(emailData, type, null, null);
+    if (backendPayload?.EmailData && typeof backendPayload.EmailData === "object") {
+      delete backendPayload.EmailData.BodyHtml;
+    }
+    const localRecordPayload = normalizeEmailAddinRecord({
+      _id: "",
+      Type: type,
+      EmailData: sanitizeEmailAddinData(emailData),
+      Resumes: resumes,
+      Documents: documents
+    });
     const response = await fetch(new URL("EmailAddinRecord", API_HOST), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(buildEmailAddinRecordPayload(emailData, type, resumes, documents))
+      body: JSON.stringify(backendPayload)
     });
 
     const data = await readApiResponse(response);
@@ -151,7 +164,16 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
       return;
     }
 
-    res.json(data);
+    const normalizedRecord = normalizeEmailAddinRecord(data);
+    const mergedRecord = mergeEmailAddinRecordWithCache(
+      normalizedRecord,
+      {
+        ...localRecordPayload,
+        _id: normalizedRecord?._id || normalizedRecord?.id || ""
+      }
+    );
+    cacheEmailAddinRecord(mergedRecord);
+    res.json(mergedRecord);
   } catch (error) {
     res.status(502).json({
       message: "Unable to reach the TrackTalents API.",
@@ -191,7 +213,11 @@ app.get("/api/EmailAddinRecord/:recordId", async (req, res) => {
       return;
     }
 
-    res.json(data);
+    const normalizedRecord = normalizeEmailAddinRecord(data);
+    const cachedRecord = emailAddinRecordCache.get(recordId);
+    const mergedRecord = mergeEmailAddinRecordWithCache(normalizedRecord, cachedRecord);
+    cacheEmailAddinRecord(mergedRecord);
+    res.json(mergedRecord);
   } catch (error) {
     res.status(502).json({
       message: "Unable to reach the TrackTalents API.",
@@ -246,6 +272,7 @@ app.post("/api/attach-email/link", async (req, res) => {
   const entityType = typeof req.body?.entityType === "string" ? req.body.entityType.trim() : "";
   const entityId = typeof req.body?.entityId === "string" ? req.body.entityId.trim() : "";
   const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+  const documents = Array.isArray(req.body?.documents) ? req.body.documents : [];
   const noteDescription =
     typeof req.body?.noteDescription === "string" ? req.body.noteDescription.trim() : "";
 
@@ -260,19 +287,29 @@ app.post("/api/attach-email/link", async (req, res) => {
   }
 
   if (!noteDescription) {
-    res.status(400).json({ message: "A note description is required for the email attachment." });
+    res.status(400).json({ message: "A note description is required for the linked email." });
     return;
   }
 
   const normalizedEntityName = normalizeAttachEmailEntityName(entityType);
   if (!normalizedEntityName) {
     res.status(400).json({
-      message: "Only Contacts and Candidates can be linked from Attach Email."
+      message: "Only Contacts and Candidates can be linked from Linked Emails."
     });
     return;
   }
 
   try {
+    if (documents.length > 0) {
+      await attachDocumentsToTrackTalentsEntity(
+        normalizedEntityName,
+        entityId,
+        documents,
+        accessToken,
+        userId
+      );
+    }
+
     const response = await fetch(new URL("Activities", API_HOST), {
       method: "POST",
       headers: {
@@ -293,7 +330,7 @@ app.post("/api/attach-email/link", async (req, res) => {
     const data = await readApiResponse(response);
     if (!response.ok) {
       res.status(response.status).json({
-        message: extractApiMessage(data) || "Unable to attach the email to the selected record.",
+        message: extractApiMessage(data) || "Unable to link the email to the selected record.",
         details: data
       });
       return;
@@ -586,6 +623,187 @@ function normalizeAttachEmailEntityName(value) {
   return "";
 }
 
+async function attachDocumentsToTrackTalentsEntity(
+  normalizedEntityName,
+  entityId,
+  documents,
+  accessToken,
+  userId
+) {
+  if (!Array.isArray(documents) || documents.length === 0) {
+    return;
+  }
+
+  if (normalizedEntityName === "Candidates") {
+    await appendDocumentsToCandidate(entityId, documents, accessToken, userId);
+    return;
+  }
+
+  if (normalizedEntityName === "Contacts") {
+    await appendDocumentsToContact(entityId, documents, accessToken, userId);
+  }
+}
+
+async function appendDocumentsToCandidate(candidateId, documents, accessToken, userId) {
+  const latestCandidate = await fetchTrackTalentsJson(
+    `candidates/${encodeURIComponent(candidateId)}`,
+    accessToken,
+    {
+      method: "GET",
+      errorMessage: "Unable to load the selected candidate before attaching this email."
+    }
+  );
+
+  const updatedDocuments = mergeTrackTalentsDocuments(
+    latestCandidate?.Documents,
+    documents,
+    userId
+  );
+  const normalizedResumes = Array.isArray(latestCandidate?.Resumes)
+    ? latestCandidate.Resumes
+    : [];
+  const resolvedUserId = pickFirstString(
+    latestCandidate?.UserId,
+    latestCandidate?.CandidateData?.UserId,
+    userId
+  );
+
+  await fetchTrackTalentsJson(`candidates/${encodeURIComponent(candidateId)}`, accessToken, {
+    method: "PUT",
+    body: {
+      CandidateData: latestCandidate?.CandidateData || {},
+      Documents: updatedDocuments,
+      Resumes: normalizedResumes,
+      ...(resolvedUserId ? { UserId: resolvedUserId } : {})
+    },
+    errorMessage: "Unable to save email attachments onto the selected candidate."
+  });
+}
+
+async function appendDocumentsToContact(contactId, documents, accessToken, userId) {
+  const latestContact = await fetchTrackTalentsJson(
+    `Contacts/${encodeURIComponent(contactId)}`,
+    accessToken,
+    {
+      method: "GET",
+      errorMessage: "Unable to load the selected contact before attaching this email."
+    }
+  );
+
+  const updatedDocuments = mergeTrackTalentsDocuments(latestContact?.Documents, documents, userId);
+
+  await fetchTrackTalentsJson(`Contacts/${encodeURIComponent(contactId)}`, accessToken, {
+    method: "PUT",
+    body: {
+      ContactData: latestContact?.ContactData || {},
+      Documents: updatedDocuments,
+      ...(pickFirstString(latestContact?.UserId, latestContact?.ContactData?.UserId, userId)
+        ? {
+            UserId: pickFirstString(
+              latestContact?.UserId,
+              latestContact?.ContactData?.UserId,
+              userId
+            )
+          }
+        : {})
+    },
+    errorMessage: "Unable to save email attachments onto the selected contact."
+  });
+}
+
+function mergeTrackTalentsDocuments(existingDocuments, importedDocuments, userId) {
+  const mergedDocuments = Array.isArray(existingDocuments)
+    ? existingDocuments
+        .filter((document) => document && typeof document === "object")
+        .map((document) => ({ ...document }))
+    : [];
+
+  importedDocuments.forEach((document, index) => {
+    const normalizedDocument = buildTrackTalentsEntityDocument(document, index, userId);
+    if (!normalizedDocument) {
+      return;
+    }
+
+    const alreadyExists = mergedDocuments.some((existingDocument) =>
+      trackTalentsDocumentsMatch(existingDocument, normalizedDocument)
+    );
+
+    if (!alreadyExists) {
+      mergedDocuments.push(normalizedDocument);
+    }
+  });
+
+  return mergedDocuments;
+}
+
+function buildTrackTalentsEntityDocument(document, index, userId) {
+  const normalizedDocument = normalizeEmailAddinRecordDocument(document, index);
+  if (!normalizedDocument) {
+    return null;
+  }
+
+  const safeUserId = pickFirstString(normalizedDocument.UserId, userId);
+  const owners = normalizeOwnerIds(normalizedDocument.Owners);
+  const normalizedOwners = owners.length > 0 ? owners : safeUserId ? [safeUserId] : [];
+
+  return {
+    DocumentGuid: pickFirstString(normalizedDocument.DocumentGuid),
+    DocumentId: pickFirstString(normalizedDocument.DocumentId) || buildRandomId(),
+    DocumentName: pickFirstString(
+      normalizedDocument.DocumentName,
+      normalizedDocument.DocumentDesc,
+      `Imported Document ${index + 1}`
+    ),
+    DocumentDesc: pickFirstString(
+      normalizedDocument.DocumentDesc,
+      normalizedDocument.DocumentName,
+      `Imported Document ${index + 1}`
+    ),
+    DocumentType: pickFirstString(normalizedDocument.DocumentType, "Document"),
+    CreateDate: pickFirstString(normalizedDocument.CreateDate) || new Date().toISOString(),
+    Owners: normalizedOwners,
+    Private: Boolean(normalizedDocument.Private),
+    UserId: safeUserId
+  };
+}
+
+function trackTalentsDocumentsMatch(existingDocument, nextDocument) {
+  const existingGuid = pickFirstString(existingDocument?.DocumentGuid);
+  const nextGuid = pickFirstString(nextDocument?.DocumentGuid);
+  if (existingGuid && nextGuid) {
+    return existingGuid === nextGuid;
+  }
+
+  const existingId = pickFirstString(existingDocument?.DocumentId);
+  const nextId = pickFirstString(nextDocument?.DocumentId);
+  return Boolean(existingId && nextId && existingId === nextId);
+}
+
+async function fetchTrackTalentsJson(endpoint, accessToken, options = {}) {
+  const method = typeof options.method === "string" ? options.method.toUpperCase() : "GET";
+  const headers = {
+    Authorization: `Bearer ${accessToken}`
+  };
+
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(new URL(endpoint, API_HOST), {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+  });
+
+  const data = await readApiResponse(response);
+  if (!response.ok) {
+    throw new Error(extractApiMessage(data) || options.errorMessage || "TrackTalents request failed.");
+  }
+
+  return data;
+}
+
 function normalizeGridNumber(value, fallback, minimum = 0, maximum = 100) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -739,6 +957,11 @@ function sanitizeEmailAddinData(emailData) {
       : typeof emailData?.body === "string"
         ? emailData.body
         : "",
+    BodyHtml: typeof emailData?.BodyHtml === "string"
+      ? emailData.BodyHtml
+      : typeof emailData?.bodyHtml === "string"
+        ? emailData.bodyHtml
+        : "",
     Subject: typeof emailData?.Subject === "string"
       ? emailData.Subject
       : typeof emailData?.subject === "string"
@@ -752,10 +975,347 @@ function sanitizeEmailAddinData(emailData) {
 function buildEmailAddinRecordPayload(emailData, type, resumes, documents) {
   return {
     EmailData: sanitizeEmailAddinData(emailData),
-    Resumes: resumes,
-    Documents: documents,
+    Resumes: serializeEmailAddinRecordResumes(resumes),
+    Documents: serializeEmailAddinRecordDocuments(documents),
     Type: type
   };
+}
+
+function serializeEmailAddinRecordResumes(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  return value
+    .map((resume, index) => serializeEmailAddinRecordResume(resume, index))
+    .filter(Boolean);
+}
+
+function serializeEmailAddinRecordDocuments(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  return value
+    .map((document, index) => serializeEmailAddinRecordDocument(document, index))
+    .filter(Boolean);
+}
+
+function serializeEmailAddinRecordResume(resume, index) {
+  const normalizedResume = normalizeEmailAddinRecordResume(resume, index);
+  if (!normalizedResume) {
+    return null;
+  }
+
+  return {
+    ResumeId: pickFirstString(normalizedResume.ResumeId),
+    ResumeTitle: pickFirstString(normalizedResume.ResumeTitle, normalizedResume.ResumeName),
+    ResumeName: pickFirstString(normalizedResume.ResumeName, normalizedResume.ResumeTitle),
+    ResumeText: pickFirstString(normalizedResume.ResumeText),
+    IsPrimary: Boolean(normalizedResume.IsPrimary)
+  };
+}
+
+function serializeEmailAddinRecordDocument(document, index) {
+  const normalizedDocument = normalizeEmailAddinRecordDocument(document, index);
+  if (!normalizedDocument) {
+    return null;
+  }
+
+  return {
+    DocumentGuid: pickFirstString(normalizedDocument.DocumentGuid),
+    DocumentId: pickFirstString(normalizedDocument.DocumentId),
+    DocumentName: pickFirstString(normalizedDocument.DocumentName, normalizedDocument.DocumentDesc),
+    DocumentDesc: pickFirstString(normalizedDocument.DocumentDesc, normalizedDocument.DocumentName),
+    DocumentType: pickFirstString(normalizedDocument.DocumentType),
+    Owners: normalizeOwnerIds(normalizedDocument.Owners),
+    Private: Boolean(normalizedDocument.Private),
+    UserId: pickFirstString(normalizedDocument.UserId),
+    CreateDate: pickFirstString(normalizedDocument.CreateDate)
+  };
+}
+
+function normalizeEmailAddinRecord(record) {
+  if (!record || typeof record !== "object") {
+    return record;
+  }
+
+  return {
+    ...record,
+    EmailData: sanitizeEmailAddinData(record.EmailData ?? record.emailData),
+    Resumes: normalizeEmailAddinRecordResumes(record.Resumes ?? record.resumes),
+    Documents: normalizeEmailAddinRecordDocuments(record.Documents ?? record.documents)
+  };
+}
+
+function cacheEmailAddinRecord(record) {
+  const recordId = pickFirstString(record?._id, record?.id);
+  if (!recordId || !record || typeof record !== "object") {
+    return;
+  }
+
+  emailAddinRecordCache.set(recordId, record);
+}
+
+function mergeEmailAddinRecordWithCache(record, cachedRecord) {
+  if (!cachedRecord || typeof cachedRecord !== "object") {
+    return record;
+  }
+
+  if (!record || typeof record !== "object") {
+    return cachedRecord;
+  }
+
+  const mergedDocuments = mergeCachedEmailAddinDocuments(record.Documents, cachedRecord.Documents);
+  const mergedResumes =
+    Array.isArray(record.Resumes) && record.Resumes.length > 0
+      ? record.Resumes
+      : Array.isArray(cachedRecord.Resumes)
+        ? cachedRecord.Resumes
+        : record.Resumes;
+  const mergedEmailData = mergeEmailAddinEmailData(record.EmailData, cachedRecord.EmailData);
+
+  return {
+    ...cachedRecord,
+    ...record,
+    EmailData: mergedEmailData,
+    Documents: mergedDocuments,
+    Resumes: mergedResumes
+  };
+}
+
+function mergeEmailAddinEmailData(emailData, cachedEmailData) {
+  const nextEmailData = sanitizeEmailAddinData(emailData);
+  const previousEmailData = sanitizeEmailAddinData(cachedEmailData);
+
+  return {
+    Body: pickFirstString(nextEmailData?.Body, previousEmailData?.Body),
+    BodyHtml: pickFirstString(nextEmailData?.BodyHtml, previousEmailData?.BodyHtml),
+    Subject: pickFirstString(nextEmailData?.Subject, previousEmailData?.Subject),
+    From: {
+      Name: pickFirstString(nextEmailData?.From?.Name, previousEmailData?.From?.Name),
+      Email: pickFirstString(nextEmailData?.From?.Email, previousEmailData?.From?.Email)
+    },
+    To:
+      Array.isArray(nextEmailData?.To) && nextEmailData.To.length > 0
+        ? nextEmailData.To
+        : previousEmailData?.To
+  };
+}
+
+function mergeCachedEmailAddinDocuments(documents, cachedDocuments) {
+  const nextDocuments = normalizeEmailAddinRecordDocuments(documents);
+  const previousDocuments = normalizeEmailAddinRecordDocuments(cachedDocuments);
+
+  if (nextDocuments.length === 0) {
+    return previousDocuments;
+  }
+
+  if (previousDocuments.length === 0) {
+    return nextDocuments;
+  }
+
+  return nextDocuments.map((document, index) => {
+    const cachedDocument = previousDocuments.find((entry) =>
+      trackTalentsDocumentsMatch(entry, document)
+    );
+
+    if (!cachedDocument) {
+      return document;
+    }
+
+    return {
+      ...cachedDocument,
+      ...document,
+      Content: pickFirstString(document.Content, document.content, cachedDocument.Content),
+      ContentType: pickFirstString(
+        document.ContentType,
+        document.contentType,
+        cachedDocument.ContentType
+      ),
+      ContentFormat: pickFirstString(
+        document.ContentFormat,
+        document.contentFormat,
+        cachedDocument.ContentFormat
+      ),
+      Size: Number(document.Size || document.size || cachedDocument.Size || 0),
+      DocumentId: pickFirstString(document.DocumentId, cachedDocument.DocumentId) || `OUTLOOK-DOCUMENT-${index + 1}`,
+      DocumentGuid: pickFirstString(document.DocumentGuid, cachedDocument.DocumentGuid)
+    };
+  });
+}
+
+function normalizeEmailAddinRecordResumes(value) {
+  return coerceArrayLike(value)
+    .map((resume, index) => normalizeEmailAddinRecordResume(resume, index))
+    .filter(Boolean);
+}
+
+function normalizeEmailAddinRecordDocuments(value) {
+  return coerceArrayLike(value)
+    .map((document, index) => normalizeEmailAddinRecordDocument(document, index))
+    .filter(Boolean);
+}
+
+function normalizeEmailAddinRecordResume(resume, index) {
+  if (typeof resume === "string") {
+    const value = resume.trim();
+    if (!value) {
+      return null;
+    }
+
+    return {
+      ResumeId: `OUTLOOK-RESUME-${index + 1}`,
+      ResumeTitle: value,
+      ResumeName: value,
+      ResumeText: "",
+      IsPrimary: index === 0
+    };
+  }
+
+  if (!resume || typeof resume !== "object") {
+    return null;
+  }
+
+  const resumeId = pickFirstString(resume.ResumeId, resume.resumeId, resume._id, resume.id);
+  const resumeName = pickFirstString(
+    resume.ResumeName,
+    resume.resumeName,
+    resume.ResumeTitle,
+    resume.resumeTitle,
+    resume.FileName,
+    resume.fileName,
+    resume.name
+  );
+
+  return {
+    ...resume,
+    ResumeId: resumeId || `OUTLOOK-RESUME-${index + 1}`,
+    ResumeTitle: pickFirstString(resume.ResumeTitle, resume.resumeTitle, resumeName),
+    ResumeName: resumeName || `Imported Resume ${index + 1}`,
+    ResumeText: pickFirstString(resume.ResumeText, resume.resumeText),
+    IsPrimary: typeof resume.IsPrimary === "boolean" ? resume.IsPrimary : index === 0
+  };
+}
+
+function normalizeEmailAddinRecordDocument(document, index) {
+  if (typeof document === "string") {
+    const value = document.trim();
+    if (!value) {
+      return null;
+    }
+
+    return {
+      DocumentId: `OUTLOOK-DOCUMENT-${index + 1}`,
+      DocumentGuid: "",
+      DocumentName: value,
+      DocumentDesc: value,
+      DocumentType: "Document",
+      ContentType: "",
+      ContentFormat: "",
+      Content: "",
+      Size: 0,
+      CreateDate: new Date().toISOString(),
+      Owners: [],
+      Private: false,
+      UserId: ""
+    };
+  }
+
+  if (!document || typeof document !== "object") {
+    return null;
+  }
+
+  const documentName = pickFirstString(
+    document.DocumentName,
+    document.documentName,
+    document.DocumentDesc,
+    document.documentDesc,
+    document.FileName,
+    document.fileName,
+    document.name
+  );
+
+  return {
+    ...document,
+    DocumentGuid: pickFirstString(document.DocumentGuid, document.documentGuid, document.guid),
+    DocumentId:
+      pickFirstString(document.DocumentId, document.documentId, document._id, document.id) ||
+      `OUTLOOK-DOCUMENT-${index + 1}`,
+    DocumentName: documentName || `Imported Document ${index + 1}`,
+    DocumentDesc: pickFirstString(document.DocumentDesc, document.documentDesc, documentName),
+    DocumentType: pickFirstString(
+      document.DocumentType,
+      document.documentType,
+      document.Type,
+      document.type,
+      "Document"
+    ),
+    ContentType: pickFirstString(document.ContentType, document.contentType),
+    ContentFormat: pickFirstString(document.ContentFormat, document.contentFormat),
+    Content: pickFirstString(document.Content, document.content),
+    Size: Number(document.Size || document.size || 0),
+    CreateDate: pickFirstString(document.CreateDate, document.createDate) || new Date().toISOString(),
+    Owners: normalizeOwnerIds(document.Owners),
+    Private: Boolean(document.Private),
+    UserId: pickFirstString(document.UserId, document.userId)
+  };
+}
+
+function normalizeOwnerIds(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((owner) => {
+      if (typeof owner === "string" && owner.trim()) {
+        return owner.trim();
+      }
+
+      if (owner && typeof owner === "object") {
+        return pickFirstString(owner.value, owner.label, owner.UserId, owner.userId, owner.id);
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+}
+
+function coerceArrayLike(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      return coerceArrayLike(parsed);
+    } catch {
+      return [trimmed];
+    }
+  }
+
+  if (value && typeof value === "object") {
+    return [value];
+  }
+
+  return [];
+}
+
+function pickFirstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
 function sanitizeSingleRecipient(recipient) {
@@ -796,26 +1356,48 @@ function sanitizeRecipientList(recipients) {
 
 function buildImportedDocument(attachment, documentGuid, userId) {
   const safeUserId = String(userId || "");
-  const owners = safeUserId
-    ? [
-        {
-          value: safeUserId,
-          label: safeUserId
-        }
-      ]
-    : [];
+  const owners = safeUserId ? [safeUserId] : [];
+  const documentType = inferTrackTalentsDocumentType(attachment?.name);
 
   return {
     DocumentGuid: documentGuid,
     DocumentId: buildRandomId(),
     DocumentName: String(attachment?.name || "Imported Document"),
     DocumentDesc: String(attachment?.name || "Imported Document"),
-    DocumentType: "Email Attachment",
+    DocumentType: documentType,
+    ContentType: String(attachment?.contentType || "application/octet-stream"),
+    ContentFormat: String(attachment?.contentFormat || "base64"),
+    Content: typeof attachment?.content === "string" ? attachment.content : "",
+    Size: Number(attachment?.size || 0),
     CreateDate: new Date().toISOString(),
     Owners: owners,
     Private: false,
     UserId: safeUserId
   };
+}
+
+function inferTrackTalentsDocumentType(fileName) {
+  const normalizedName = String(fileName || "").trim().toLowerCase();
+  if (!normalizedName) {
+    return "Other";
+  }
+
+  if (/\b(resume|cv)\b/.test(normalizedName)) {
+    return "Resume";
+  }
+
+  if (/cover[\s._-]*letter/.test(normalizedName)) {
+    return "Cover Letter";
+  }
+
+  if (
+    /work[\s._-]*authorization/.test(normalizedName) ||
+    /\b(visa|ead|i-9|i9|h1b|passport)\b/.test(normalizedName)
+  ) {
+    return "Work Authorization";
+  }
+
+  return "Other";
 }
 
 function buildRandomId() {
@@ -975,6 +1557,22 @@ function extractApiMessage(data) {
   }
 
   if (typeof data === "object") {
+    if (typeof data.ExceptionMessage === "string" && data.ExceptionMessage.trim()) {
+      return data.ExceptionMessage.trim();
+    }
+
+    if (typeof data.MessageDetail === "string" && data.MessageDetail.trim()) {
+      return data.MessageDetail.trim();
+    }
+
+    if (
+      typeof data.Message === "string" &&
+      data.Message.trim() &&
+      data.Message.trim().toLowerCase() !== "an error has occurred."
+    ) {
+      return data.Message.trim();
+    }
+
     if (typeof data.message === "string" && data.message.trim()) {
       return data.message.trim();
     }
@@ -985,6 +1583,10 @@ function extractApiMessage(data) {
 
     if (typeof data.error === "string" && data.error.trim()) {
       return data.error.trim();
+    }
+
+    if (data.details && typeof data.details === "object") {
+      return extractApiMessage(data.details);
     }
   }
 
