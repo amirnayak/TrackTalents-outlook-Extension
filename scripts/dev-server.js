@@ -1,7 +1,7 @@
 const http = require("http");
 const https = require("https");
 const path = require("path");
-const { randomUUID } = require("crypto");
+const { createHash, randomUUID } = require("crypto");
 
 const express = require("express");
 const devCerts = require("office-addin-dev-certs");
@@ -17,6 +17,7 @@ const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 3000
 const app = express();
 const outlookImportSessions = new Map();
 const emailAddinRecordCache = new Map();
+const linkedEmailEntityCache = new Map();
 
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -136,9 +137,6 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
   try {
     const requestPayload = buildEmailAddinRecordPayload(emailData, type, resumes, documents);
     const backendPayload = buildEmailAddinRecordPayload(emailData, type, null, null);
-    if (backendPayload?.EmailData && typeof backendPayload.EmailData === "object") {
-      delete backendPayload.EmailData.BodyHtml;
-    }
     const localRecordPayload = normalizeEmailAddinRecord({
       _id: "",
       Type: type,
@@ -267,12 +265,44 @@ app.get("/api/attach-email/candidates", async (req, res) => {
   }
 });
 
+app.post("/api/attach-email/lookup", async (req, res) => {
+  const accessToken = readAccessToken(req);
+  const emailContext =
+    req.body?.emailContext && typeof req.body.emailContext === "object"
+      ? req.body.emailContext
+      : {};
+
+  if (!accessToken) {
+    res.status(401).json({ message: "TrackTalents access token is required." });
+    return;
+  }
+
+  try {
+    const cachedLookup = getLinkedEmailEntityLookup(emailContext);
+    const apiLookup = await lookupLinkedEmailEntitiesFromApi(accessToken, emailContext);
+
+    res.json(mergeLinkedEmailLookups(cachedLookup, apiLookup));
+  } catch (error) {
+    res.json(getLinkedEmailEntityLookup(emailContext));
+  }
+});
+
 app.post("/api/attach-email/link", async (req, res) => {
   const accessToken = readAccessToken(req);
   const entityType = typeof req.body?.entityType === "string" ? req.body.entityType.trim() : "";
   const entityId = typeof req.body?.entityId === "string" ? req.body.entityId.trim() : "";
   const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
   const documents = Array.isArray(req.body?.documents) ? req.body.documents : [];
+  const emailRecordId =
+    typeof req.body?.emailRecordId === "string" ? req.body.emailRecordId.trim() : "";
+  const emailContext =
+    req.body?.emailContext && typeof req.body.emailContext === "object"
+      ? req.body.emailContext
+      : {};
+  const entitySnapshot =
+    req.body?.entitySnapshot && typeof req.body.entitySnapshot === "object"
+      ? req.body.entitySnapshot
+      : {};
   const noteDescription =
     typeof req.body?.noteDescription === "string" ? req.body.noteDescription.trim() : "";
 
@@ -300,14 +330,28 @@ app.post("/api/attach-email/link", async (req, res) => {
   }
 
   try {
+    let attachmentWarning = "";
+
     if (documents.length > 0) {
-      await attachDocumentsToTrackTalentsEntity(
-        normalizedEntityName,
-        entityId,
-        documents,
-        accessToken,
-        userId
-      );
+      try {
+        await attachDocumentsToTrackTalentsEntity(
+          normalizedEntityName,
+          entityId,
+          documents,
+          accessToken,
+          userId
+        );
+      } catch (error) {
+        attachmentWarning =
+          error instanceof Error
+            ? error.message
+            : "TrackTalents could not attach the imported documents to the selected record.";
+        console.warn("Linked email document attach failed", {
+          entityType: normalizedEntityName,
+          entityId,
+          attachmentWarning
+        });
+      }
     }
 
     const response = await fetch(new URL("Activities", API_HOST), {
@@ -336,10 +380,22 @@ app.post("/api/attach-email/link", async (req, res) => {
       return;
     }
 
+    cacheLinkedEmailEntityLink(
+      emailContext,
+      normalizedEntityName,
+      buildLinkedEntitySnapshot(normalizedEntityName, entityId, entitySnapshot, {
+        emailRecordId,
+        userId,
+        linkedAt: new Date().toISOString()
+      })
+    );
+
     res.json({
       success: true,
       entityType: normalizedEntityName,
       entityId,
+      ...(attachmentWarning ? { attachmentWarning } : {}),
+      linkedLookup: getLinkedEmailEntityLookup(emailContext),
       data
     });
   } catch (error) {
@@ -585,6 +641,436 @@ function sanitizeEmailContext(emailContext) {
     toRecipients: sanitizeRecipientList(emailContext?.toRecipients),
     bodyPreview: typeof emailContext?.bodyPreview === "string" ? emailContext.bodyPreview : ""
   };
+}
+
+function sanitizeLinkedEmailLookupContext(emailContext) {
+  return {
+    itemId: pickFirstString(emailContext?.itemId, emailContext?.internetMessageId),
+    subject: typeof emailContext?.subject === "string" ? emailContext.subject : "",
+    fromName: typeof emailContext?.fromName === "string" ? emailContext.fromName : "",
+    fromEmail: typeof emailContext?.fromEmail === "string" ? emailContext.fromEmail : "",
+    toRecipients: sanitizeRecipientList(emailContext?.toRecipients),
+    bodyPreview:
+      typeof emailContext?.bodyPreview === "string"
+        ? emailContext.bodyPreview
+        : typeof emailContext?.body === "string"
+          ? emailContext.body
+          : ""
+  };
+}
+
+function buildLinkedEmailLookupKeys(emailContext) {
+  const normalizedContext = sanitizeLinkedEmailLookupContext(emailContext);
+  const keys = [];
+  const itemId = pickFirstString(normalizedContext.itemId);
+
+  if (itemId) {
+    keys.push(`item:${itemId}`);
+  }
+
+  const fromEmail = String(normalizedContext.fromEmail || "").trim().toLowerCase();
+  const subject = String(normalizedContext.subject || "").trim().toLowerCase();
+  const bodyPreview = String(normalizedContext.bodyPreview || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .slice(0, 280);
+  const toKey = normalizedContext.toRecipients
+    .map((recipient) => String(recipient?.Email || "").trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const fallbackSource = [fromEmail, subject, toKey, bodyPreview].join("|");
+
+  if (fallbackSource.replace(/\|/g, "").trim()) {
+    keys.push(`fingerprint:${createHash("sha256").update(fallbackSource).digest("hex")}`);
+  }
+
+  return Array.from(new Set(keys));
+}
+
+function buildLinkedEntitySnapshot(entityType, entityId, entitySnapshot, options = {}) {
+  const normalizedEntityName = normalizeAttachEmailEntityName(entityType);
+  const snapshot = entitySnapshot && typeof entitySnapshot === "object" ? entitySnapshot : {};
+  const baseSnapshot = {
+    id: entityId,
+    name: pickFirstString(snapshot.name, snapshot.Name) || entityId,
+    email: pickFirstString(snapshot.email, snapshot.Email),
+    userId: pickFirstString(snapshot.userId, snapshot.UserId, options.userId),
+    emailRecordId: pickFirstString(
+      snapshot.emailRecordId,
+      snapshot.EmailRecordId,
+      options.emailRecordId
+    ),
+    linkedAt: pickFirstString(snapshot.linkedAt, snapshot.LinkedAt, options.linkedAt)
+  };
+
+  if (normalizedEntityName === "Contacts") {
+    return {
+      ...baseSnapshot,
+      company: pickFirstString(snapshot.company, snapshot.Company),
+      subtitle: pickFirstString(snapshot.subtitle, snapshot.Subtitle)
+    };
+  }
+
+  if (normalizedEntityName === "Candidates") {
+    return {
+      ...baseSnapshot,
+      title: pickFirstString(snapshot.title, snapshot.Title),
+      location: pickFirstString(snapshot.location, snapshot.Location)
+    };
+  }
+
+  return baseSnapshot;
+}
+
+function mergeLinkedEntitySnapshot(previousSnapshot, nextSnapshot) {
+  const previous = previousSnapshot && typeof previousSnapshot === "object" ? previousSnapshot : {};
+  const next = nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : {};
+
+  return {
+    ...previous,
+    ...next,
+    id: pickFirstString(next.id, previous.id),
+    name: pickFirstString(next.name, previous.name),
+    email: pickFirstString(next.email, previous.email),
+    userId: pickFirstString(next.userId, previous.userId),
+    emailRecordId: pickFirstString(next.emailRecordId, previous.emailRecordId),
+    linkedAt: pickFirstString(next.linkedAt, previous.linkedAt),
+    company: pickFirstString(next.company, previous.company),
+    subtitle: pickFirstString(next.subtitle, previous.subtitle),
+    title: pickFirstString(next.title, previous.title),
+    location: pickFirstString(next.location, previous.location)
+  };
+}
+
+function upsertLinkedEntitySnapshot(list, nextSnapshot) {
+  const currentList = Array.isArray(list) ? list : [];
+  const snapshotId = pickFirstString(nextSnapshot?.id);
+  if (!snapshotId) {
+    return currentList;
+  }
+
+  const existingIndex = currentList.findIndex((entry) => pickFirstString(entry?.id) === snapshotId);
+  if (existingIndex < 0) {
+    return [...currentList, nextSnapshot];
+  }
+
+  return currentList.map((entry, index) =>
+    index === existingIndex ? mergeLinkedEntitySnapshot(entry, nextSnapshot) : entry
+  );
+}
+
+function sortLinkedEntitySnapshots(list) {
+  return [...(Array.isArray(list) ? list : [])].sort((left, right) => {
+    const leftTime = new Date(left?.linkedAt || 0).getTime();
+    const rightTime = new Date(right?.linkedAt || 0).getTime();
+    return rightTime - leftTime;
+  });
+}
+
+function cacheLinkedEmailEntityLink(emailContext, entityType, entitySnapshot) {
+  const normalizedEntityName = normalizeAttachEmailEntityName(entityType);
+  if (!normalizedEntityName) {
+    return;
+  }
+
+  const lookupKeys = buildLinkedEmailLookupKeys(emailContext);
+  if (lookupKeys.length === 0) {
+    return;
+  }
+
+  const bucketKey = normalizedEntityName === "Candidates" ? "candidates" : "contacts";
+  const normalizedContext = sanitizeLinkedEmailLookupContext(emailContext);
+
+  lookupKeys.forEach((lookupKey) => {
+    const existingEntry = linkedEmailEntityCache.get(lookupKey) || {
+      emailContext: normalizedContext,
+      contacts: [],
+      candidates: []
+    };
+
+    linkedEmailEntityCache.set(lookupKey, {
+      emailContext: {
+        ...existingEntry.emailContext,
+        ...normalizedContext
+      },
+      contacts: bucketKey === "contacts"
+        ? upsertLinkedEntitySnapshot(existingEntry.contacts, entitySnapshot)
+        : existingEntry.contacts,
+      candidates: bucketKey === "candidates"
+        ? upsertLinkedEntitySnapshot(existingEntry.candidates, entitySnapshot)
+        : existingEntry.candidates
+    });
+  });
+}
+
+function getLinkedEmailEntityLookup(emailContext) {
+  const lookupKeys = buildLinkedEmailLookupKeys(emailContext);
+  const contactsById = new Map();
+  const candidatesById = new Map();
+
+  lookupKeys.forEach((lookupKey) => {
+    const cacheEntry = linkedEmailEntityCache.get(lookupKey);
+    if (!cacheEntry) {
+      return;
+    }
+
+    (Array.isArray(cacheEntry.contacts) ? cacheEntry.contacts : []).forEach((contact) => {
+      const contactId = pickFirstString(contact?.id);
+      if (!contactId) {
+        return;
+      }
+
+      contactsById.set(
+        contactId,
+        contactsById.has(contactId)
+          ? mergeLinkedEntitySnapshot(contactsById.get(contactId), contact)
+          : contact
+      );
+    });
+
+    (Array.isArray(cacheEntry.candidates) ? cacheEntry.candidates : []).forEach((candidate) => {
+      const candidateId = pickFirstString(candidate?.id);
+      if (!candidateId) {
+        return;
+      }
+
+      candidatesById.set(
+        candidateId,
+        candidatesById.has(candidateId)
+          ? mergeLinkedEntitySnapshot(candidatesById.get(candidateId), candidate)
+          : candidate
+      );
+    });
+  });
+
+  return {
+    contacts: sortLinkedEntitySnapshots(Array.from(contactsById.values())),
+    candidates: sortLinkedEntitySnapshots(Array.from(candidatesById.values()))
+  };
+}
+
+function mergeLinkedEmailLookups(primaryLookup, secondaryLookup) {
+  const contacts = [];
+  const candidates = [];
+
+  (Array.isArray(primaryLookup?.contacts) ? primaryLookup.contacts : []).forEach((contact) => {
+    contacts.push(contact);
+  });
+  (Array.isArray(secondaryLookup?.contacts) ? secondaryLookup.contacts : []).forEach((contact) => {
+    contacts.push(contact);
+  });
+
+  (Array.isArray(primaryLookup?.candidates) ? primaryLookup.candidates : []).forEach((candidate) => {
+    candidates.push(candidate);
+  });
+  (Array.isArray(secondaryLookup?.candidates) ? secondaryLookup.candidates : []).forEach((candidate) => {
+    candidates.push(candidate);
+  });
+
+  return {
+    contacts: sortLinkedEntitySnapshots(
+      contacts.reduce((list, contact) => upsertLinkedEntitySnapshot(list, contact), [])
+    ),
+    candidates: sortLinkedEntitySnapshots(
+      candidates.reduce((list, candidate) => upsertLinkedEntitySnapshot(list, candidate), [])
+    )
+  };
+}
+
+async function lookupLinkedEmailEntitiesFromApi(accessToken, emailContext) {
+  const matchingRecordIds = await findMatchingEmailAddinRecordIds(accessToken, emailContext);
+  if (matchingRecordIds.length === 0) {
+    return {
+      contacts: [],
+      candidates: []
+    };
+  }
+
+  const activities = await fetchActivitiesForEmailRecordIds(accessToken, matchingRecordIds);
+  if (activities.length === 0) {
+    return {
+      contacts: [],
+      candidates: []
+    };
+  }
+
+  return await hydrateLinkedEntitiesFromActivities(accessToken, activities, matchingRecordIds[0]);
+}
+
+async function findMatchingEmailAddinRecordIds(accessToken, emailContext) {
+  const records = await fetchTrackTalentsJson("EmailAddinRecord", accessToken, {
+    method: "GET",
+    errorMessage: "Unable to load linked email records from TrackTalents."
+  });
+
+  const items = Array.isArray(records)
+    ? records
+    : Array.isArray(records?.data)
+      ? records.data
+      : Array.isArray(records?.items)
+        ? records.items
+        : [];
+
+  const lookupKeys = new Set(buildLinkedEmailLookupKeys(emailContext));
+
+  return items
+    .map((record) => normalizeEmailAddinRecord(record))
+    .filter((record) => {
+      if (!record || typeof record !== "object") {
+        return false;
+      }
+
+      const recordLookupKeys = buildLinkedEmailLookupKeys({
+        subject: record?.EmailData?.Subject || "",
+        fromName: record?.EmailData?.From?.Name || "",
+        fromEmail: record?.EmailData?.From?.Email || "",
+        toRecipients: Array.isArray(record?.EmailData?.To) ? record.EmailData.To : [],
+        bodyPreview: buildComparableBodyPreview(record?.EmailData?.Body || "")
+      });
+
+      return recordLookupKeys.some((key) => lookupKeys.has(key));
+    })
+    .map((record) => pickFirstString(record?._id, record?.id))
+    .filter(Boolean);
+}
+
+async function fetchActivitiesForEmailRecordIds(accessToken, recordIds) {
+  const uniqueRecordIds = Array.from(new Set(recordIds.filter(Boolean)));
+  if (uniqueRecordIds.length === 0) {
+    return [];
+  }
+
+  const noteDescriptionFilter = uniqueRecordIds.reduce((filter, recordId, index) => {
+    const nextCondition = ["NoteDescription", "contains", `Email Add-in Record ID: ${recordId}`];
+    if (index === 0) {
+      return nextCondition;
+    }
+
+    return [filter, "or", nextCondition];
+  }, null);
+
+  const filter = noteDescriptionFilter
+    ? JSON.stringify([["NoteType", "=", "Email"], "and", noteDescriptionFilter])
+    : "";
+
+  const payload = await fetchAttachEmailGrid(
+    "Activities",
+    accessToken,
+    {
+      skip: "0",
+      take: "100",
+      requireTotalCount: "true",
+      filter
+    },
+    {
+      sort: '[{"selector":"CreateDate","desc":true}]'
+    }
+  );
+
+  return Array.isArray(payload?.data) ? payload.data : [];
+}
+
+async function hydrateLinkedEntitiesFromActivities(accessToken, activities, emailRecordId) {
+  const lookup = {
+    contacts: [],
+    candidates: []
+  };
+  const seenContacts = new Set();
+  const seenCandidates = new Set();
+
+  for (const activity of Array.isArray(activities) ? activities : []) {
+    const entityName = normalizeAttachEmailEntityName(activity?.EntityName || activity?.entityName);
+    const entityId = pickFirstString(activity?.EntityID, activity?.EntityId, activity?.entityId);
+    const userId = pickFirstString(activity?.UserId, activity?.userId);
+    const linkedAt = pickFirstString(activity?.CreateDate, activity?.createDate);
+
+    if (!entityName || !entityId) {
+      continue;
+    }
+
+    if (entityName === "Contacts") {
+      if (seenContacts.has(entityId)) {
+        continue;
+      }
+
+      seenContacts.add(entityId);
+      const contact = await fetchTrackTalentsJson(`Contacts/${encodeURIComponent(entityId)}`, accessToken, {
+        method: "GET",
+        errorMessage: "Unable to load a linked contact from TrackTalents."
+      });
+      lookup.contacts.push(
+        buildLinkedEntitySnapshot(entityName, entityId, normalizeAttachEmailLookupContact(contact), {
+          userId,
+          emailRecordId,
+          linkedAt
+        })
+      );
+      continue;
+    }
+
+    if (entityName === "Candidates") {
+      if (seenCandidates.has(entityId)) {
+        continue;
+      }
+
+      seenCandidates.add(entityId);
+      const candidate = await fetchTrackTalentsJson(`candidates/${encodeURIComponent(entityId)}`, accessToken, {
+        method: "GET",
+        errorMessage: "Unable to load a linked candidate from TrackTalents."
+      });
+      lookup.candidates.push(
+        buildLinkedEntitySnapshot(entityName, entityId, normalizeAttachEmailLookupCandidate(candidate), {
+          userId,
+          emailRecordId,
+          linkedAt
+        })
+      );
+    }
+  }
+
+  return lookup;
+}
+
+function normalizeAttachEmailLookupContact(record) {
+  const contactData = record?.ContactData && typeof record.ContactData === "object" ? record.ContactData : {};
+  const contactInfo = contactData?.Contact && typeof contactData.Contact === "object" ? contactData.Contact : {};
+  const firstName = String(contactData.FirstName || "").trim();
+  const lastName = String(contactData.LastName || "").trim();
+
+  return {
+    name: String(contactData.Name || `${firstName} ${lastName}`).trim() || "Unnamed Contact",
+    email: String(contactInfo.Email1 || contactInfo.Email2 || ""),
+    company: String(contactData.CompanyName || ""),
+    subtitle: String(contactData.JobTitle || "")
+  };
+}
+
+function normalizeAttachEmailLookupCandidate(record) {
+  const candidateData =
+    record?.CandidateData && typeof record.CandidateData === "object" ? record.CandidateData : {};
+  const contactInfo =
+    candidateData?.Contact && typeof candidateData.Contact === "object" ? candidateData.Contact : {};
+  const firstName = String(candidateData.FirstName || "").trim();
+  const lastName = String(candidateData.LastName || "").trim();
+
+  return {
+    name: `${firstName} ${lastName}`.trim() || "Unnamed Candidate",
+    email: String(contactInfo.Email1 || contactInfo.Email2 || ""),
+    title: String(candidateData.JobTitle || ""),
+    location: String(candidateData.CurrentLocation || candidateData.Relocation || "")
+  };
+}
+
+function buildComparableBodyPreview(value) {
+  return String(value || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 280);
 }
 
 function readAccessToken(req) {
@@ -951,17 +1437,15 @@ function extractAttachEmailSearchValue(filterValue) {
 }
 
 function sanitizeEmailAddinData(emailData) {
+  const canonicalBody = pickFirstString(
+    typeof emailData?.BodyHtml === "string" ? emailData.BodyHtml : "",
+    typeof emailData?.bodyHtml === "string" ? emailData.bodyHtml : "",
+    typeof emailData?.Body === "string" ? emailData.Body : "",
+    typeof emailData?.body === "string" ? emailData.body : ""
+  );
+
   return {
-    Body: typeof emailData?.Body === "string"
-      ? emailData.Body
-      : typeof emailData?.body === "string"
-        ? emailData.body
-        : "",
-    BodyHtml: typeof emailData?.BodyHtml === "string"
-      ? emailData.BodyHtml
-      : typeof emailData?.bodyHtml === "string"
-        ? emailData.bodyHtml
-        : "",
+    Body: canonicalBody,
     Subject: typeof emailData?.Subject === "string"
       ? emailData.Subject
       : typeof emailData?.subject === "string"
@@ -1090,7 +1574,6 @@ function mergeEmailAddinEmailData(emailData, cachedEmailData) {
 
   return {
     Body: pickFirstString(nextEmailData?.Body, previousEmailData?.Body),
-    BodyHtml: pickFirstString(nextEmailData?.BodyHtml, previousEmailData?.BodyHtml),
     Subject: pickFirstString(nextEmailData?.Subject, previousEmailData?.Subject),
     From: {
       Name: pickFirstString(nextEmailData?.From?.Name, previousEmailData?.From?.Name),

@@ -113,10 +113,13 @@ function buildAttachEmailState() {
     activeTab: "contacts",
     search: "",
     loading: false,
+    linkedLoading: false,
     error: "",
     submitting: false,
     contacts: [],
     candidates: [],
+    linkedContacts: [],
+    linkedCandidates: [],
     contactsTotal: 0,
     candidatesTotal: 0,
     contactsPage: 0,
@@ -545,6 +548,76 @@ function normalizeAttachEmailCandidate(record) {
   };
 }
 
+function normalizeAttachEmailLinkedContact(record) {
+  const linkedRecord = record && typeof record === "object" ? record : {};
+
+  return {
+    id: String(linkedRecord.id || ""),
+    name: String(linkedRecord.name || "Unnamed Contact"),
+    email: String(linkedRecord.email || ""),
+    company: String(linkedRecord.company || ""),
+    subtitle: String(linkedRecord.subtitle || ""),
+    userId: String(linkedRecord.userId || ""),
+    emailRecordId: String(linkedRecord.emailRecordId || ""),
+    linkedAt: String(linkedRecord.linkedAt || "")
+  };
+}
+
+function normalizeAttachEmailLinkedCandidate(record) {
+  const linkedRecord = record && typeof record === "object" ? record : {};
+
+  return {
+    id: String(linkedRecord.id || ""),
+    name: String(linkedRecord.name || "Unnamed Candidate"),
+    email: String(linkedRecord.email || ""),
+    title: String(linkedRecord.title || ""),
+    location: String(linkedRecord.location || ""),
+    userId: String(linkedRecord.userId || ""),
+    emailRecordId: String(linkedRecord.emailRecordId || ""),
+    linkedAt: String(linkedRecord.linkedAt || "")
+  };
+}
+
+function buildCurrentEmailContext() {
+  const item = state.currentItem || {};
+
+  return {
+    itemId: String(item.itemId || ""),
+    subject: String(item.subject || ""),
+    fromName: String(item.from?.displayName || ""),
+    fromEmail: String(item.from?.email || ""),
+    toRecipients: normalizeRecipientList(item.to).map((recipient) => ({
+      Name: recipient.displayName,
+      Email: recipient.email
+    })),
+    bodyPreview: String(item.bodyPreview || "")
+  };
+}
+
+function buildAttachEmailEntitySnapshot(type, record) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  if (type === "candidates") {
+    return {
+      id: String(record.id || ""),
+      name: String(record.name || ""),
+      email: String(record.email || ""),
+      title: String(record.title || ""),
+      location: String(record.location || "")
+    };
+  }
+
+  return {
+    id: String(record.id || ""),
+    name: String(record.name || ""),
+    email: String(record.email || ""),
+    company: String(record.company || ""),
+    subtitle: String(record.subtitle || "")
+  };
+}
+
 async function fetchAttachEmailRecords(type, options = {}) {
   const page = Math.max(0, Number(options.page || 0));
   const search = String(options.search ?? state.attachEmail.search ?? "").trim();
@@ -581,6 +654,33 @@ async function fetchAttachEmailRecords(type, options = {}) {
         ? rows.map(normalizeAttachEmailCandidate)
         : rows.map(normalizeAttachEmailContact),
     totalCount
+  };
+}
+
+async function fetchAttachEmailLinkedRecords() {
+  const response = await fetch("/api/attach-email/lookup", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.auth?.accessToken || ""}`
+    },
+    body: JSON.stringify({
+      emailContext: buildCurrentEmailContext()
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || "Unable to load linked records for this email.");
+  }
+
+  return {
+    contacts: Array.isArray(payload?.contacts)
+      ? payload.contacts.map(normalizeAttachEmailLinkedContact)
+      : [],
+    candidates: Array.isArray(payload?.candidates)
+      ? payload.candidates.map(normalizeAttachEmailLinkedCandidate)
+      : []
   };
 }
 
@@ -667,18 +767,59 @@ async function loadAttachEmailRecords(options = {}) {
   }
 }
 
+async function loadAttachEmailLinkedRecords(options = {}) {
+  const renderLoading = options.renderLoading !== false;
+
+  state.attachEmail.linkedLoading = true;
+  if (renderLoading) {
+    render();
+  }
+
+  try {
+    const result = await fetchAttachEmailLinkedRecords();
+    state.attachEmail.linkedContacts = result.contacts;
+    state.attachEmail.linkedCandidates = result.candidates;
+    state.attachEmail.linkedLoading = false;
+    render();
+  } catch (error) {
+    state.attachEmail.linkedContacts = [];
+    state.attachEmail.linkedCandidates = [];
+    state.attachEmail.linkedLoading = false;
+
+    if (!state.attachEmail.error) {
+      state.attachEmail.error =
+        error instanceof Error ? error.message : "Unable to load linked records for this email.";
+    }
+
+    render();
+  }
+}
+
 function openAttachEmailPanel() {
   state.attachEmail = buildAttachEmailState();
   state.attachEmail.open = true;
   render();
+  void loadAttachEmailLinkedRecords();
   void loadAttachEmailRecords({
     loadContacts: true,
     loadCandidates: true
   });
 }
 
+function getAttachEmailLinkedRows(type) {
+  return type === "candidates" ? state.attachEmail.linkedCandidates : state.attachEmail.linkedContacts;
+}
+
+function isAttachEmailAlreadyLinked(type, recordId) {
+  return getAttachEmailLinkedRows(type).some((record) => record.id === recordId);
+}
+
 function toggleAttachEmailSelection(type, recordId) {
   if (!recordId) {
+    return;
+  }
+
+  if (isAttachEmailAlreadyLinked(type, recordId)) {
     return;
   }
 
@@ -704,8 +845,16 @@ function toggleAttachEmailSelection(type, recordId) {
 function buildAttachEmailSummaryCopy() {
   const contactCount = state.attachEmail.selectedContacts.length;
   const candidateCount = state.attachEmail.selectedCandidates.length;
+  const linkedContactCount = state.attachEmail.linkedContacts.length;
+  const linkedCandidateCount = state.attachEmail.linkedCandidates.length;
 
   if (!contactCount && !candidateCount) {
+    if (linkedContactCount || linkedCandidateCount) {
+      return `This email is already linked to ${linkedContactCount} contact${
+        linkedContactCount === 1 ? "" : "s"
+      } and ${linkedCandidateCount} candidate${linkedCandidateCount === 1 ? "" : "s"}.`;
+    }
+
     return "Choose one or more contacts or candidates to prepare this email for attachment.";
   }
 
@@ -742,18 +891,13 @@ function buildAttachEmailActivityNote(recordId) {
     .join("\n");
 }
 
-function buildAttachEmailSuccessMessage(contactCount, candidateCount) {
-  return `Email linked to ${contactCount} contact${contactCount === 1 ? "" : "s"} and ${candidateCount} candidate${
-    candidateCount === 1 ? "" : "s"
-  }.`;
-}
-
 async function attachEmailToTrackTalentsRecord(
   entityType,
   entityId,
   noteDescription,
   userId,
-  documents = []
+  documents = [],
+  options = {}
 ) {
   const response = await fetch("/api/attach-email/link", {
     method: "POST",
@@ -766,7 +910,14 @@ async function attachEmailToTrackTalentsRecord(
       entityId,
       noteDescription,
       userId: String(userId || "").trim(),
-      documents: Array.isArray(documents) ? documents : []
+      documents: Array.isArray(documents) ? documents : [],
+      emailRecordId: String(options.emailRecordId || "").trim(),
+      emailContext: options.emailContext && typeof options.emailContext === "object"
+        ? options.emailContext
+        : {},
+      entitySnapshot: options.entitySnapshot && typeof options.entitySnapshot === "object"
+        ? options.entitySnapshot
+        : {}
     })
   });
 
@@ -784,14 +935,16 @@ function buildAttachEmailSummaryRows() {
   if (state.attachEmail.selectedContacts.length) {
     rows.push({
       label: `Contacts (${state.attachEmail.selectedContacts.length})`,
-      values: state.attachEmail.selectedContacts.map((contact) => contact.name)
+      values: state.attachEmail.selectedContacts.map((contact) => contact.name),
+      tone: "selected"
     });
   }
 
   if (state.attachEmail.selectedCandidates.length) {
     rows.push({
       label: `Candidates (${state.attachEmail.selectedCandidates.length})`,
-      values: state.attachEmail.selectedCandidates.map((candidate) => candidate.name)
+      values: state.attachEmail.selectedCandidates.map((candidate) => candidate.name),
+      tone: "selected"
     });
   }
 
@@ -813,13 +966,76 @@ function renderAttachEmailSummaryRows() {
               <strong>${escapeHtml(row.label)}</strong>
               <div class="attach-email-chip-list">
                 ${row.values
-                  .map((value) => `<span class="attach-email-chip">${escapeHtml(value)}</span>`)
+                  .map(
+                    (value) =>
+                      `<span class="attach-email-chip ${
+                        row.tone === "linked" ? "attach-email-chip-linked" : ""
+                      }">${escapeHtml(value)}</span>`
+                  )
                   .join("")}
               </div>
             </div>
           `
         )
         .join("")}
+    </div>
+  `;
+}
+
+function renderAttachEmailLinkedGroups() {
+  const linkedContacts = state.attachEmail.linkedContacts;
+  const linkedCandidates = state.attachEmail.linkedCandidates;
+
+  return `
+    <div class="attach-email-linked-panel">
+      <div class="attach-email-linked-panel-copy">
+        <strong>Already Linked For This Email</strong>
+        <span>${
+          state.attachEmail.linkedLoading
+            ? "Checking whether this selected Outlook email is already linked..."
+            : "These contacts and candidates are already linked to the currently selected email."
+        }</span>
+      </div>
+
+      ${
+        state.attachEmail.linkedLoading
+          ? '<div class="attach-email-summary-status">Checking existing linked records for this email...</div>'
+          : `
+            <div class="attach-email-linked-groups">
+              <div class="attach-email-linked-group">
+                <strong>Contacts (${linkedContacts.length})</strong>
+                <div class="attach-email-chip-list">
+                  ${
+                    linkedContacts.length > 0
+                      ? linkedContacts
+                          .map(
+                            (contact) =>
+                              `<span class="attach-email-chip attach-email-chip-linked">${escapeHtml(contact.name)}</span>`
+                          )
+                          .join("")
+                      : '<span class="attach-email-linked-empty">No linked contacts</span>'
+                  }
+                </div>
+              </div>
+
+              <div class="attach-email-linked-group">
+                <strong>Candidates (${linkedCandidates.length})</strong>
+                <div class="attach-email-chip-list">
+                  ${
+                    linkedCandidates.length > 0
+                      ? linkedCandidates
+                          .map(
+                            (candidate) =>
+                              `<span class="attach-email-chip attach-email-chip-linked">${escapeHtml(candidate.name)}</span>`
+                          )
+                          .join("")
+                      : '<span class="attach-email-linked-empty">No linked candidates</span>'
+                  }
+                </div>
+              </div>
+            </div>
+          `
+      }
     </div>
   `;
 }
@@ -852,14 +1068,21 @@ function renderAttachEmailTable() {
           ${rows
             .map((candidate) => {
               const selected = isAttachEmailSelected("candidates", candidate.id);
+              const alreadyLinked = isAttachEmailAlreadyLinked("candidates", candidate.id);
               return `
                 <button
                   type="button"
-                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""} ${
+                    alreadyLinked ? "attach-email-row-linked" : ""
+                  }"
                   data-attach-email-row-type="candidates"
                   data-attach-email-row-id="${escapeAttribute(candidate.id)}"
+                  ${alreadyLinked ? "disabled" : ""}
                 >
-                  <span>${escapeHtml(candidate.name)}</span>
+                  <div class="attach-email-row-cell attach-email-row-cell-primary">
+                    <span>${escapeHtml(candidate.name)}</span>
+                    ${alreadyLinked ? '<span class="attach-email-inline-tag">Linked</span>' : ""}
+                  </div>
                   <span>${escapeHtml(candidate.email || "—")}</span>
                   <span>${escapeHtml(candidate.location || "—")}</span>
                 </button>
@@ -882,14 +1105,21 @@ function renderAttachEmailTable() {
         ${rows
           .map((contact) => {
             const selected = isAttachEmailSelected("contacts", contact.id);
+            const alreadyLinked = isAttachEmailAlreadyLinked("contacts", contact.id);
             return `
               <button
                 type="button"
-                class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                class="attach-email-row ${selected ? "attach-email-row-selected" : ""} ${
+                  alreadyLinked ? "attach-email-row-linked" : ""
+                }"
                 data-attach-email-row-type="contacts"
                 data-attach-email-row-id="${escapeAttribute(contact.id)}"
+                ${alreadyLinked ? "disabled" : ""}
               >
-                <span>${escapeHtml(contact.name)}</span>
+                <div class="attach-email-row-cell attach-email-row-cell-primary">
+                  <span>${escapeHtml(contact.name)}</span>
+                  ${alreadyLinked ? '<span class="attach-email-inline-tag">Linked</span>' : ""}
+                </div>
                 <span>${escapeHtml(contact.email || "—")}</span>
                 <span>${escapeHtml(contact.company || "—")}</span>
               </button>
@@ -906,6 +1136,8 @@ function renderAttachEmailPanel() {
   const currentPage = getAttachEmailCurrentPage(activeTab);
   const pageCount = getAttachEmailPageCount(activeTab);
   const hasSelection = getAttachEmailSelectedTotal() > 0;
+  const hasLinkedRecords =
+    state.attachEmail.linkedContacts.length > 0 || state.attachEmail.linkedCandidates.length > 0;
   const submitLabel = state.attachEmail.submitting ? "Linking..." : "Link Email";
   const searchPlaceholder =
     activeTab === "candidates" ? "Search candidates..." : "Search contacts...";
@@ -925,15 +1157,25 @@ function renderAttachEmailPanel() {
           </div>
         </div>
 
-        <div class="attach-email-summary ${hasSelection ? "attach-email-summary-active" : ""}">
+        <div class="attach-email-summary ${
+          hasSelection ? "attach-email-summary-active" : hasLinkedRecords ? "attach-email-summary-linked" : ""
+        }">
           <div class="attach-email-summary-copy">
-            <strong>${hasSelection ? "Ready to link" : "Select records"}</strong>
+            <strong>${
+              hasSelection
+                ? "Ready to link"
+                : hasLinkedRecords
+                  ? "Already linked"
+                  : "Select records"
+            }</strong>
             <span>${escapeHtml(buildAttachEmailSummaryCopy())}</span>
           </div>
           ${renderAttachEmailSummaryRows()}
         </div>
 
         ${state.attachEmail.error ? `<div class="banner banner-error">${escapeHtml(state.attachEmail.error)}</div>` : ""}
+
+        ${renderAttachEmailLinkedGroups()}
 
         <div class="attach-email-tabs" role="tablist" aria-label="TrackTalents lists">
           <button
@@ -1045,13 +1287,13 @@ function renderLoginModal() {
         <div class="login-header">
           <div>
             <p class="section-label">TrackTalents Access</p>
-            <h2 id="login-title">Sign in inside Outlook</h2>
+            <h2 id="login-title">Sign in to TrackTalents</h2>
           </div>
           <button id="close-login-button" class="icon-button" type="button" aria-label="Close login dialog">X</button>
         </div>
 
         <p class="login-copy">
-          Sign in once here. After that, every action button will open the matching TrackTalents create form in a separate tab.
+          use your TrackTalents Credentials to signin to link your Outlook emails to TrackTalents Records
         </p>
 
         ${
@@ -1596,6 +1838,7 @@ async function handleAttachEmailSubmit() {
         state.auth?.loginData?.UserId ||
         ""
     ).trim();
+    const emailContext = buildCurrentEmailContext();
 
     const attachTasks = [
       ...state.attachEmail.selectedContacts.map((contact) =>
@@ -1604,7 +1847,12 @@ async function handleAttachEmailSubmit() {
           contact.id,
           noteDescription,
           activityUserId,
-          importedDocuments
+          importedDocuments,
+          {
+            emailRecordId: recordId,
+            emailContext,
+            entitySnapshot: buildAttachEmailEntitySnapshot("contacts", contact)
+          }
         )
       ),
       ...state.attachEmail.selectedCandidates.map((candidate) =>
@@ -1613,14 +1861,19 @@ async function handleAttachEmailSubmit() {
           candidate.id,
           noteDescription,
           activityUserId,
-          importedDocuments
+          importedDocuments,
+          {
+            emailRecordId: recordId,
+            emailContext,
+            entitySnapshot: buildAttachEmailEntitySnapshot("candidates", candidate)
+          }
         )
       )
     ];
 
     await Promise.all(attachTasks);
 
-    state.launchMessage = buildAttachEmailSuccessMessage(contactCount, candidateCount);
+    state.launchMessage = "";
     closeAttachEmailPanel();
     render();
   } catch (error) {
@@ -1680,7 +1933,7 @@ async function handleLoginSubmit(event) {
     state.loginError = "";
     state.showLoginModal = false;
     state.loginForm.password = "";
-    state.launchMessage = `Welcome ${getWelcomeName()}. You are signed in and ready to open TrackTalents create forms in separate tabs.`;
+    state.launchMessage = "";
 
     const pendingActionId = state.pendingActionId;
     state.pendingActionId = null;
@@ -1906,14 +2159,15 @@ function logEmailAddinRecordDebug(stage, details) {
 
 function buildEmailAddinRecordRequest(type, options = {}) {
   const item = state.currentItem || {};
+  const resolvedBodyHtml = String(options.bodyHtml ?? item.bodyHtml ?? "");
+  const resolvedBodyText = String(options.body ?? item.bodyPreview ?? "");
 
   return {
     type,
     resumes: Array.isArray(options.resumes) ? options.resumes : null,
     documents: buildDocumentPayload(options.documents),
     emailData: {
-      Body: String(options.body ?? item.bodyPreview ?? ""),
-      BodyHtml: String(options.bodyHtml ?? item.bodyHtml ?? ""),
+      Body: resolvedBodyHtml || resolvedBodyText,
       Subject: String(options.subject ?? item.subject ?? ""),
       From: {
         Name: String(options.fromName ?? item.from?.displayName ?? ""),
@@ -2539,6 +2793,16 @@ function setOfficeUserState() {
 
 function handleOutlookItemChanged() {
   readCurrentItem();
+
+  if (state.attachEmail.open) {
+    state.attachEmail.selectedContacts = [];
+    state.attachEmail.selectedCandidates = [];
+    state.attachEmail.error = "";
+    state.attachEmail.linkedContacts = [];
+    state.attachEmail.linkedCandidates = [];
+    state.attachEmail.linkedLoading = true;
+    void loadAttachEmailLinkedRecords({ renderLoading: false });
+  }
 
   if (state.importModal.open && state.importModal.actionId) {
     state.importModal = buildImportModalForAction(state.importModal.actionId);
