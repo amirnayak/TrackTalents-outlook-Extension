@@ -40,6 +40,7 @@ npm run dev
 The add-in files will be hosted at:
 
 - `https://localhost:3201/taskpane.html`
+- `https://localhost:3201/manifest.xml`
 
 The Codex in-app browser may not trust local developer certificates. For previewing the same page there, use:
 
@@ -66,6 +67,18 @@ Override it when needed:
 ```bash
 EMAIL_PARSER_API_URL=https://tracktalents-ai-production.up.railway.app npm run dev
 ```
+
+## Railway Deployment
+
+The deployed add-in exposes a manifest at:
+
+```text
+https://tracktalents-outlook-extension-production.up.railway.app/manifest.xml
+```
+
+The manifest is generated from `manifest/tracktalents-outlook-manifest.xml` and rewrites local URLs to the public Railway host. If the Railway domain changes, set `ADDIN_PUBLIC_URL` to the new public base URL.
+
+Set `APP_HOST` in Railway to the public TrackTalents ATS web app URL when the add-in should open live ATS pages instead of local development pages.
 
 ## Sideload into Outlook
 

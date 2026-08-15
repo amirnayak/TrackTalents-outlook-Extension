@@ -1,5 +1,6 @@
 const http = require("http");
 const https = require("https");
+const fs = require("fs");
 const path = require("path");
 const { randomUUID } = require("crypto");
 
@@ -16,6 +17,7 @@ const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/"
 const APP_HOST = process.env.APP_HOST || "http://localhost:3000";
 const EMAIL_PARSER_API_URL =
   process.env.EMAIL_PARSER_API_URL || "https://tracktalents-ai-production.up.railway.app";
+const ADDIN_PUBLIC_URL = process.env.ADDIN_PUBLIC_URL || "";
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || "100mb";
 const OUTLOOK_IMPORT_SESSION_TTL_MS = 15 * 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000);
@@ -38,6 +40,15 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+
+app.get("/manifest.xml", (req, res) => {
+  const manifestPath = path.join(__dirname, "..", "manifest", "tracktalents-outlook-manifest.xml");
+  const manifestXml = fs.readFileSync(manifestPath, "utf8");
+  const publicUrl = getAddinPublicUrl(req);
+
+  res.type("application/xml").send(manifestXml.replaceAll("https://localhost:3201", publicUrl));
+});
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/health", (_req, res) => {
@@ -50,6 +61,7 @@ app.get("/health", (_req, res) => {
     apiHost: API_HOST,
     appHost: APP_HOST,
     emailParserApiUrl: EMAIL_PARSER_API_URL,
+    addinPublicUrl: ADDIN_PUBLIC_URL || null,
     requestBodyLimit: REQUEST_BODY_LIMIT
   });
 });
@@ -62,6 +74,24 @@ app.get("/api/config", (_req, res) => {
     forgotPasswordPath: "/forgotpassword"
   });
 });
+
+function getAddinPublicUrl(req) {
+  const configuredUrl = ADDIN_PUBLIC_URL.trim().replace(/\/+$/, "");
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  if (IS_PRODUCTION_HOSTING) {
+    const forwardedProto = String(req.get("x-forwarded-proto") || "https").split(",")[0].trim();
+    const forwardedHost = String(req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+
+    if (forwardedHost) {
+      return `${forwardedProto || "https"}://${forwardedHost}`;
+    }
+  }
+
+  return `https://localhost:${HTTPS_PORT}`;
+}
 
 app.use((error, _req, res, next) => {
   if (error?.type === "entity.too.large") {
