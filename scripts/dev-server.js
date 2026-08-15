@@ -8,7 +8,10 @@ const devCerts = require("office-addin-dev-certs");
 
 const HTTPS_PORT = Number(process.env.PORT || 3201);
 const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
-const HOST = "localhost";
+const IS_PRODUCTION_HOSTING =
+  process.env.NODE_ENV === "production" ||
+  Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
+const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "localhost");
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
 const APP_HOST = process.env.APP_HOST || "http://localhost:3000";
 const EMAIL_PARSER_API_URL =
@@ -41,6 +44,7 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     host: HOST,
+    productionHosting: IS_PRODUCTION_HOSTING,
     httpsPort: HTTPS_PORT,
     httpPreviewPort: HTTP_PREVIEW_PORT,
     apiHost: API_HOST,
@@ -1738,6 +1742,16 @@ function buildPreviewCandidateImportPayload(selectedResume, attachments, emailCo
 }
 
 async function start() {
+  if (IS_PRODUCTION_HOSTING) {
+    const httpServer = http.createServer(app);
+
+    httpServer.listen(HTTPS_PORT, HOST, () => {
+      console.log(`TrackTalents Outlook app running at http://${HOST}:${HTTPS_PORT}`);
+      console.log(`Health check: http://${HOST}:${HTTPS_PORT}/health`);
+    });
+    return;
+  }
+
   const httpsOptions = await devCerts.getHttpsServerOptions();
 
   if (!httpsOptions || !httpsOptions.key || !httpsOptions.cert) {
