@@ -11,6 +11,8 @@ const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
 const HOST = "localhost";
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
 const APP_HOST = process.env.APP_HOST || "http://localhost:3000";
+const EMAIL_PARSER_API_URL =
+  process.env.EMAIL_PARSER_API_URL || "https://tracktalents-ai-production.up.railway.app";
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || "100mb";
 const OUTLOOK_IMPORT_SESSION_TTL_MS = 15 * 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000);
@@ -43,6 +45,7 @@ app.get("/health", (_req, res) => {
     httpPreviewPort: HTTP_PREVIEW_PORT,
     apiHost: API_HOST,
     appHost: APP_HOST,
+    emailParserApiUrl: EMAIL_PARSER_API_URL,
     requestBodyLimit: REQUEST_BODY_LIMIT
   });
 });
@@ -373,6 +376,43 @@ app.post("/api/resume/parse", async (req, res) => {
     res.status(502).json({
       message:
         error instanceof Error ? error.message : "Unable to parse the selected Outlook resume.",
+      details: error instanceof Error ? error.stack : String(error)
+    });
+  }
+});
+
+app.post("/api/email/parse", async (req, res) => {
+  const parseType = typeof req.body?.parse_type === "string" ? req.body.parse_type.trim() : "";
+
+  if (parseType !== "contact" && parseType !== "job") {
+    res.status(400).json({ message: "Email parse type must be contact or job." });
+    return;
+  }
+
+  try {
+    const response = await fetch(new URL("/api/email/parse", EMAIL_PARSER_API_URL), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+    });
+
+    const payload = await readApiResponse(response);
+    if (!response.ok) {
+      res.status(response.status).json({
+        message: payload?.message || "Unable to parse the Outlook email.",
+        details: payload
+      });
+      return;
+    }
+
+    res.json(payload);
+  } catch (error) {
+    res.status(502).json({
+      message:
+        error instanceof Error ? error.message : "Unable to reach the email parser API.",
       details: error instanceof Error ? error.stack : String(error)
     });
   }
