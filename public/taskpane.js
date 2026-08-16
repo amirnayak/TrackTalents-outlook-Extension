@@ -236,17 +236,6 @@ function getEmailAddinRecordType(actionId) {
   }
 }
 
-function buildActionSuccessMessage(actionId, options = {}) {
-  const actionLabel = actionLabelFromId(actionId);
-  const fileName = String(options.fileName || "").trim();
-
-  if (fileName) {
-    return `${actionLabel} opened with ${fileName} imported from Outlook.`;
-  }
-
-  return `${actionLabel} opened from Outlook.`;
-}
-
 function formatContextId(item) {
   const source = item?.itemId || "preview-context";
   return String(source).replace(/[^a-zA-Z0-9]/g, "").slice(0, 18) || "previewcontext";
@@ -1276,12 +1265,6 @@ function render() {
           </div>
         </div>
 
-        ${
-          state.launchMessage
-            ? `<section class="status-stack"><div class="banner banner-success">${escapeHtml(state.launchMessage)}</div></section>`
-            : ""
-        }
-
         <div class="actions-frame">
           <div class="actions-surface">
             <div class="actions-head">
@@ -1345,7 +1328,7 @@ function bindEvents() {
       closeAttachEmailPanel();
       closeImportModal();
       persistAuth(null);
-      state.launchMessage = "You have been logged out from the TrackTalents extension.";
+      state.launchMessage = "";
       render();
     });
   }
@@ -1556,7 +1539,7 @@ function bindEvents() {
         state.pendingActionId = actionId;
         state.showLoginModal = true;
         state.loginError = "";
-        state.launchMessage = `Sign in to continue to ${actionLabelFromId(actionId)}.`;
+        state.launchMessage = "";
         render();
         return;
       }
@@ -1624,7 +1607,7 @@ async function handleAttachEmailSubmit() {
 
     await Promise.all(attachTasks);
 
-    state.launchMessage = buildAttachEmailSuccessMessage(contactCount, candidateCount);
+    state.launchMessage = "";
     closeAttachEmailPanel();
     render();
   } catch (error) {
@@ -1684,7 +1667,7 @@ async function handleLoginSubmit(event) {
     state.loginError = "";
     state.showLoginModal = false;
     state.loginForm.password = "";
-    state.launchMessage = `Welcome ${getWelcomeName()}. You are signed in and ready to open TrackTalents create forms in separate tabs.`;
+    state.launchMessage = "";
 
     const pendingActionId = state.pendingActionId;
     state.pendingActionId = null;
@@ -2297,8 +2280,7 @@ function launchAction(actionId, options = {}) {
       selectedResume: options.selectedResume
     });
     safeOpenWindow(url);
-    state.launchMessage =
-      options.successMessage || `${actionLabelFromId(actionId)} opened in a separate tab.`;
+    state.launchMessage = "";
     state.showLoginModal = false;
     closeAttachEmailPanel();
     closeImportModal();
@@ -2323,7 +2305,7 @@ async function handleDirectActionLaunch(actionId) {
     let emailParserImportOptions = {};
 
     if (isEmailParserAction(actionId)) {
-      state.launchMessage = `Parsing this email for ${actionLabelFromId(actionId)}...`;
+      state.launchMessage = "";
       render();
 
       try {
@@ -2402,7 +2384,7 @@ async function handleDirectActionLaunch(actionId) {
       step: "launch-action"
     });
 
-    state.launchMessage = buildActionSuccessMessage(actionId);
+    state.launchMessage = "";
     state.showLoginModal = false;
     closeImportModal();
     render();
@@ -2594,9 +2576,7 @@ async function handleImportSubmit() {
       step: "launch-action"
     });
 
-    state.launchMessage = buildActionSuccessMessage(actionId, {
-      fileName: resolvedSelectedResume.name
-    });
+    state.launchMessage = "";
     state.showLoginModal = false;
     closeImportModal();
     render();
