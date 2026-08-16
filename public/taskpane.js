@@ -1867,6 +1867,37 @@ function splitFullName(fullName) {
   };
 }
 
+function firstNonEmpty(...values) {
+  return values.find((value) => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+
+    return value !== undefined && value !== null && String(value).trim() !== "";
+  });
+}
+
+function normalizePayType(value) {
+  const text = String(value || "").toLowerCase();
+  if (!text) {
+    return "";
+  }
+
+  if (/\b(hour|hourly|\/hr|\/hour|w2|c2c)\b/.test(text)) {
+    return "Hourly";
+  }
+
+  if (/\b(year|yearly|annual|annum|salary)\b/.test(text)) {
+    return "Yearly";
+  }
+
+  if (/\b(month|monthly)\b/.test(text)) {
+    return "Monthly";
+  }
+
+  return "";
+}
+
 function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
   const data = parserResult?.structured_data || {};
 
@@ -1887,8 +1918,14 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
         StreetAddress: data.street_address || "",
         City: data.city || "",
         State: data.state || "",
-        PostalCode: data.postal_code || ""
+        PostalCode: data.postal_code || "",
+        Country: data.country || "USA"
       },
+      StreetAddress: data.street_address || "",
+      City: data.city || "",
+      State: data.state || "",
+      PostalCode: data.postal_code || "",
+      Country: data.country || "USA",
       EmailParserData: data,
       EmailParserConfidence: parserResult?.confidence_summary || ""
     };
@@ -1896,15 +1933,26 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
 
   const requiredSkills = Array.isArray(data.required_skills) ? data.required_skills : [];
   const preferredSkills = Array.isArray(data.preferred_skills) ? data.preferred_skills : [];
+  const salaryOrBudget = data.salary_or_budget || "";
+  const yearsOfExperience = firstNonEmpty(data.years_of_experience, data.experience_required, "");
+  const payType = firstNonEmpty(data.pay_type, normalizePayType(salaryOrBudget), "");
 
   return {
     JobTitle: data.job_title || "",
     CompanyName: data.company_name || "",
+    ClientName: data.company_name || "",
     Location: data.location || "",
     WorkMode: data.work_mode || "",
     EmploymentType: data.employment_type || "",
     ExperienceRequired: data.experience_required || "",
-    SalaryOrBudget: data.salary_or_budget || "",
+    ExperienceLevel: data.experience_level || "",
+    YearsOfExperience: yearsOfExperience || "",
+    NoOfOpenings: data.no_of_openings || "",
+    PayRate: data.pay_rate || salaryOrBudget,
+    ClientRate: data.client_rate || salaryOrBudget,
+    PayType: payType || "",
+    JobType: data.job_type || "",
+    SalaryOrBudget: salaryOrBudget,
     NoticePeriod: data.notice_period || "",
     JobSummary: data.job_summary || "",
     JobDescription: data.job_description_raw || data.job_summary || "",
