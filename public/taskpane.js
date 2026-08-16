@@ -1823,22 +1823,22 @@ async function parseResumeAttachment(attachment) {
 
 function buildEmailParserRequest(actionId) {
   const item = state.currentItem || {};
+  const body = firstNonEmpty(toPlainString(item.bodyHtml), toPlainString(item.bodyPreview), "");
 
   return {
     parse_type: getEmailAddinRecordType(actionId),
     source: "outlook_extension",
-    subject: item.subject || null,
-    from_name: item.from?.displayName || null,
-    from_email: item.from?.email || null,
+    subject: toPlainString(item.subject) || null,
+    from_name: toPlainString(item.from?.displayName) || null,
+    from_email: toPlainString(item.from?.email) || null,
     to: normalizeRecipientList(item.to)
       .map((recipient) => recipient.email)
       .filter(Boolean),
     cc: [],
     sent_at: null,
-    message_id: item.itemId || null,
-    thread_id: item.conversationId || null,
-    body_html: item.bodyHtml || null,
-    body_text: item.bodyPreview || null
+    message_id: toPlainString(item.itemId) || null,
+    thread_id: toPlainString(item.conversationId) || null,
+    body: body || null
   };
 }
 
@@ -1865,6 +1865,18 @@ function splitFullName(fullName) {
     firstName: firstName || "",
     lastName: lastNameParts.join(" ")
   };
+}
+
+function toPlainString(value) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return "";
 }
 
 function firstNonEmpty(...values) {
@@ -2640,12 +2652,12 @@ function setItemStateFromOffice(item) {
   const toRecipients = normalizeRecipientList(item.to);
 
   state.currentItem = {
-    itemId: item.itemId || item.internetMessageId || "",
-    subject: item.subject || "",
+    itemId: toPlainString(item.itemId) || toPlainString(item.internetMessageId),
+    subject: toPlainString(item.subject),
     from: item.from
       ? {
-          displayName: item.from.displayName || "",
-          email: item.from.emailAddress || ""
+          displayName: toPlainString(item.from.displayName),
+          email: toPlainString(item.from.emailAddress)
         }
       : { displayName: "", email: "" },
     to: toRecipients,
