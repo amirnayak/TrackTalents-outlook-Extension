@@ -1,5 +1,6 @@
 const http = require("http");
 const https = require("https");
+const fs = require("fs");
 const path = require("path");
 const { randomUUID } = require("crypto");
 
@@ -8,9 +9,16 @@ const devCerts = require("office-addin-dev-certs");
 
 const HTTPS_PORT = Number(process.env.PORT || 3201);
 const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
-const HOST = "localhost";
+const IS_PRODUCTION_HOSTING =
+  process.env.NODE_ENV === "production" ||
+  Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
+const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "localhost");
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
-const APP_HOST = process.env.APP_HOST || "http://localhost:3000";
+const APP_HOST =
+  process.env.APP_HOST || (IS_PRODUCTION_HOSTING ? "https://newtest.tracktalents.com" : "http://localhost:3000");
+const EMAIL_PARSER_API_URL =
+  process.env.EMAIL_PARSER_API_URL || "https://tracktalents-ai-production.up.railway.app";
+const ADDIN_PUBLIC_URL = process.env.ADDIN_PUBLIC_URL || "";
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || "100mb";
 const OUTLOOK_IMPORT_SESSION_TTL_MS = 15 * 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000);
@@ -33,16 +41,28 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+
+app.get("/manifest.xml", (req, res) => {
+  const manifestPath = path.join(__dirname, "..", "manifest", "tracktalents-outlook-manifest.xml");
+  const manifestXml = fs.readFileSync(manifestPath, "utf8");
+  const publicUrl = getAddinPublicUrl(req);
+
+  res.type("application/xml").send(manifestXml.replaceAll("https://localhost:3201", publicUrl));
+});
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     host: HOST,
+    productionHosting: IS_PRODUCTION_HOSTING,
     httpsPort: HTTPS_PORT,
     httpPreviewPort: HTTP_PREVIEW_PORT,
     apiHost: API_HOST,
     appHost: APP_HOST,
+    emailParserApiUrl: EMAIL_PARSER_API_URL,
+    addinPublicUrl: ADDIN_PUBLIC_URL || null,
     requestBodyLimit: REQUEST_BODY_LIMIT
   });
 });
@@ -55,6 +75,24 @@ app.get("/api/config", (_req, res) => {
     forgotPasswordPath: "/forgotpassword"
   });
 });
+
+function getAddinPublicUrl(req) {
+  const configuredUrl = ADDIN_PUBLIC_URL.trim().replace(/\/+$/, "");
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  if (IS_PRODUCTION_HOSTING) {
+    const forwardedProto = String(req.get("x-forwarded-proto") || "https").split(",")[0].trim();
+    const forwardedHost = String(req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+
+    if (forwardedHost) {
+      return `${forwardedProto || "https"}://${forwardedHost}`;
+    }
+  }
+
+  return `https://localhost:${HTTPS_PORT}`;
+}
 
 app.use((error, _req, res, next) => {
   if (error?.type === "entity.too.large") {
@@ -373,6 +411,43 @@ app.post("/api/resume/parse", async (req, res) => {
     res.status(502).json({
       message:
         error instanceof Error ? error.message : "Unable to parse the selected Outlook resume.",
+      details: error instanceof Error ? error.stack : String(error)
+    });
+  }
+});
+
+app.post("/api/email/parse", async (req, res) => {
+  const parseType = typeof req.body?.parse_type === "string" ? req.body.parse_type.trim() : "";
+
+  if (parseType !== "contact" && parseType !== "job") {
+    res.status(400).json({ message: "Email parse type must be contact or job." });
+    return;
+  }
+
+  try {
+    const response = await fetch(new URL("/api/email/parse", EMAIL_PARSER_API_URL), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+    });
+
+    const payload = await readApiResponse(response);
+    if (!response.ok) {
+      res.status(response.status).json({
+        message: payload?.message || "Unable to parse the Outlook email.",
+        details: payload
+      });
+      return;
+    }
+
+    res.json(payload);
+  } catch (error) {
+    res.status(502).json({
+      message:
+        error instanceof Error ? error.message : "Unable to reach the email parser API.",
       details: error instanceof Error ? error.stack : String(error)
     });
   }
@@ -1698,6 +1773,16 @@ function buildPreviewCandidateImportPayload(selectedResume, attachments, emailCo
 }
 
 async function start() {
+  if (IS_PRODUCTION_HOSTING) {
+    const httpServer = http.createServer(app);
+
+    httpServer.listen(HTTPS_PORT, HOST, () => {
+      console.log(`TrackTalents Outlook app running at http://${HOST}:${HTTPS_PORT}`);
+      console.log(`Health check: http://${HOST}:${HTTPS_PORT}/health`);
+    });
+    return;
+  }
+
   const httpsOptions = await devCerts.getHttpsServerOptions();
 
   if (!httpsOptions || !httpsOptions.key || !httpsOptions.cert) {

@@ -6,6 +6,7 @@ This repo now contains the current TrackTalents Outlook add-in foundation. The c
 - TrackTalents-themed launcher UI
 - login gating when an action is clicked
 - email and resume context capture from the open Outlook message
+- AI email parsing for `Add Contact` and `Add Job`
 - app handoff into TrackTalents pages in a new browser tab
 
 ## What is included
@@ -39,12 +40,45 @@ npm run dev
 The add-in files will be hosted at:
 
 - `https://localhost:3201/taskpane.html`
+- `https://localhost:3201/manifest.xml`
 
 The Codex in-app browser may not trust local developer certificates. For previewing the same page there, use:
 
 - `http://localhost:3202/taskpane.html`
 
 These ports intentionally avoid `3001/3002` so the extension can run at the same time as `tracktalents-v2`.
+
+## Parser API
+
+`Add Contact` and `Add Job` call the email parser through the local add-in bridge:
+
+```text
+POST /api/email/parse
+```
+
+By default, the bridge forwards parser requests to the deployed Railway API:
+
+```text
+https://tracktalents-ai-production.up.railway.app
+```
+
+Override it when needed:
+
+```bash
+EMAIL_PARSER_API_URL=https://tracktalents-ai-production.up.railway.app npm run dev
+```
+
+## Railway Deployment
+
+The deployed add-in exposes a manifest at:
+
+```text
+https://tracktalents-outlook-extension-production.up.railway.app/manifest.xml
+```
+
+The manifest is generated from `manifest/tracktalents-outlook-manifest.xml` and rewrites local URLs to the public Railway host. If the Railway domain changes, set `ADDIN_PUBLIC_URL` to the new public base URL.
+
+Set `APP_HOST` in Railway to the public TrackTalents ATS web app URL when the add-in should open live ATS pages instead of local development pages.
 
 ## Sideload into Outlook
 
@@ -76,7 +110,7 @@ After sideloading:
 
 The next logical steps are:
 
-1. replace demo query-string handoff with the final resume-prefill API flow;
+1. map additional AI parser fields into the TrackTalents dynamic form configs;
 2. extend the same auto-open pattern to every remaining Outlook action;
 3. attach real parsed resume data to `Add Candidate`;
 4. add shared auth or SSO so the web app and add-in reuse one session.
