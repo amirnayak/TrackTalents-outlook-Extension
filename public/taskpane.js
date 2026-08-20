@@ -820,6 +820,11 @@ function renderAttachEmailSummaryRows() {
 function renderAttachEmailTable() {
   const activeTab = state.attachEmail.activeTab;
   const rows = getAttachEmailRows(activeTab);
+  const columnTemplate =
+    activeTab === "candidates"
+      ? "minmax(180px, 1.15fr) minmax(220px, 1fr) minmax(160px, 0.85fr)"
+      : "minmax(180px, 1.05fr) minmax(220px, 1fr) minmax(180px, 0.9fr)";
+  const tableMinWidth = activeTab === "candidates" ? "620px" : "640px";
 
   if (!rows.length) {
     return `
@@ -835,60 +840,70 @@ function renderAttachEmailTable() {
 
   if (activeTab === "candidates") {
     return `
-      <div class="attach-email-table">
-        <div class="attach-email-table-head">
-          <span>Name</span>
-          <span>Email</span>
-          <span>Location</span>
-        </div>
-        <div class="attach-email-table-body">
-          ${rows
-            .map((candidate) => {
-              const selected = isAttachEmailSelected("candidates", candidate.id);
-              return `
-                <button
-                  type="button"
-                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
-                  data-attach-email-row-type="candidates"
-                  data-attach-email-row-id="${escapeAttribute(candidate.id)}"
-                >
-                  <span>${escapeHtml(candidate.name)}</span>
-                  <span>${escapeHtml(candidate.email || "—")}</span>
-                  <span>${escapeHtml(candidate.location || "—")}</span>
-                </button>
-              `;
-            })
-            .join("")}
+      <div class="attach-email-table-shell">
+        <div
+          class="attach-email-table"
+          style="--attach-email-columns: ${escapeAttribute(columnTemplate)}; --attach-email-table-min-width: ${escapeAttribute(tableMinWidth)};"
+        >
+          <div class="attach-email-table-head">
+            <span>Name</span>
+            <span>Email</span>
+            <span>Location</span>
+          </div>
+          <div class="attach-email-table-body">
+            ${rows
+              .map((candidate) => {
+                const selected = isAttachEmailSelected("candidates", candidate.id);
+                return `
+                  <button
+                    type="button"
+                    class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                    data-attach-email-row-type="candidates"
+                    data-attach-email-row-id="${escapeAttribute(candidate.id)}"
+                  >
+                    <span>${escapeHtml(candidate.name)}</span>
+                    <span>${escapeHtml(candidate.email || "—")}</span>
+                    <span>${escapeHtml(candidate.location || "—")}</span>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
         </div>
       </div>
     `;
   }
 
   return `
-    <div class="attach-email-table">
-      <div class="attach-email-table-head">
-        <span>Name</span>
-        <span>Email</span>
-        <span>Company</span>
-      </div>
-      <div class="attach-email-table-body">
-        ${rows
-          .map((contact) => {
-            const selected = isAttachEmailSelected("contacts", contact.id);
-            return `
-              <button
-                type="button"
-                class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
-                data-attach-email-row-type="contacts"
-                data-attach-email-row-id="${escapeAttribute(contact.id)}"
-              >
-                <span>${escapeHtml(contact.name)}</span>
-                <span>${escapeHtml(contact.email || "—")}</span>
-                <span>${escapeHtml(contact.company || "—")}</span>
-              </button>
-            `;
-          })
-          .join("")}
+    <div class="attach-email-table-shell">
+      <div
+        class="attach-email-table"
+        style="--attach-email-columns: ${escapeAttribute(columnTemplate)}; --attach-email-table-min-width: ${escapeAttribute(tableMinWidth)};"
+      >
+        <div class="attach-email-table-head">
+          <span>Name</span>
+          <span>Email</span>
+          <span>Company</span>
+        </div>
+        <div class="attach-email-table-body">
+          ${rows
+            .map((contact) => {
+              const selected = isAttachEmailSelected("contacts", contact.id);
+              return `
+                <button
+                  type="button"
+                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                  data-attach-email-row-type="contacts"
+                  data-attach-email-row-id="${escapeAttribute(contact.id)}"
+                >
+                  <span>${escapeHtml(contact.name)}</span>
+                  <span>${escapeHtml(contact.email || "—")}</span>
+                  <span>${escapeHtml(contact.company || "—")}</span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
       </div>
     </div>
   `;
@@ -900,8 +915,7 @@ function renderAttachEmailPanel() {
   const pageCount = getAttachEmailPageCount(activeTab);
   const hasSelection = getAttachEmailSelectedTotal() > 0;
   const submitLabel = state.attachEmail.submitting ? "Linking..." : "Link Email";
-  const searchPlaceholder =
-    activeTab === "candidates" ? "Search candidates..." : "Search contacts...";
+  const searchPlaceholder = "Search any column...";
 
   return `
     <div class="modal-overlay" role="presentation">

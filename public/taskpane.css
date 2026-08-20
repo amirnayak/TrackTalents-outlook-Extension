@@ -765,18 +765,27 @@ input {
   border-color: var(--accent);
 }
 
-.attach-email-table {
+.attach-email-table-shell {
   margin-top: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.attach-email-table {
+  --attach-email-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(180px, 0.9fr);
+  --attach-email-table-min-width: 640px;
   border: 1px solid #d8deeb;
   border-radius: 18px;
   overflow: hidden;
   background: #ffffff;
+  min-width: var(--attach-email-table-min-width);
 }
 
 .attach-email-table-head,
 .attach-email-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: var(--attach-email-columns);
   gap: 16px;
 }
 
@@ -1085,11 +1094,6 @@ input {
     min-height: auto;
     align-items: flex-start;
     flex-wrap: wrap;
-  }
-
-  .attach-email-table-head,
-  .attach-email-row {
-    grid-template-columns: 1fr;
   }
 
   .resume-checkbox {
