@@ -2138,31 +2138,6 @@ async function createEmailAddinRecord(type, options = {}) {
   return payload;
 }
 
-async function getEmailAddinRecord(recordId) {
-  logEmailAddinRecordDebug("GET request", { recordId });
-
-  const response = await fetch(`/api/EmailAddinRecord/${encodeURIComponent(recordId)}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${state.auth?.accessToken || ""}`
-    }
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  logEmailAddinRecordDebug("GET response", {
-    ok: response.ok,
-    status: response.status,
-    recordId,
-    payload
-  });
-
-  if (!response.ok) {
-    throw new Error(payload?.message || "Unable to load the email add-in record.");
-  }
-
-  return payload;
-}
-
 function buildAbsoluteAppUrl(pathname) {
   return new URL(pathname, `${state.config.appHost}/`).toString();
 }
@@ -2316,35 +2291,40 @@ async function handleDirectActionLaunch(actionId) {
   const pendingLaunch = createPendingImportLaunch(actionId);
 
   try {
-    let emailParserImportOptions = {};
+    state.launchMessage = "";
+    render();
 
-    if (isEmailParserAction(actionId)) {
-      state.launchMessage = "";
-      render();
+    const emailParserTask = isEmailParserAction(actionId)
+      ? parseCurrentEmailForAction(actionId)
+          .then((parserResult) => {
+            logEmailAddinRecordDebug("Email parsed", {
+              actionId,
+              status: parserResult?.status || "",
+              confidence: parserResult?.confidence_summary || "",
+              missingRequiredFields: parserResult?.missing_required_fields || [],
+              step: "parse-email"
+            });
 
-      try {
-        const parserResult = await parseCurrentEmailForAction(actionId);
-        emailParserImportOptions = buildEmailParserImportOptions(actionId, parserResult);
-        logEmailAddinRecordDebug("Email parsed", {
-          actionId,
-          status: parserResult?.status || "",
-          confidence: parserResult?.confidence_summary || "",
-          missingRequiredFields: parserResult?.missing_required_fields || [],
-          step: "parse-email"
-        });
-      } catch (error) {
-        const parserWarning =
-          error instanceof Error ? error.message : "Unable to parse the current Outlook email.";
-        emailParserImportOptions = buildEmailParserImportOptions(actionId, null, parserWarning);
-        logEmailAddinRecordDebug("Email parse warning", {
-          actionId,
-          message: parserWarning,
-          step: "parse-email"
-        });
-      }
-    }
+            return buildEmailParserImportOptions(actionId, parserResult);
+          })
+          .catch((error) => {
+            const parserWarning =
+              error instanceof Error ? error.message : "Unable to parse the current Outlook email.";
+            logEmailAddinRecordDebug("Email parse warning", {
+              actionId,
+              message: parserWarning,
+              step: "parse-email"
+            });
 
-    const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
+            return buildEmailParserImportOptions(actionId, null, parserWarning);
+          })
+      : Promise.resolve({});
+    const importedDocumentsTask = prepareEmailAddinDocuments(getImportableAttachments());
+    const [emailParserImportOptions, importedDocuments] = await Promise.all([
+      emailParserTask,
+      importedDocumentsTask
+    ]);
+
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -2377,13 +2357,12 @@ async function handleDirectActionLaunch(actionId) {
     });
 
     const recordId = String(payload?._id || "");
-    const emailAddinRecord = recordId ? await getEmailAddinRecord(recordId) : payload;
     const outlookActionImport = buildOutlookActionImportPayload(actionId, {
       ...emailParserImportOptions,
       emailAddinRecord: {
-        ...emailAddinRecord,
-        _id: recordId || emailAddinRecord?._id || "",
-        Type: String(emailAddinRecord?.Type || getEmailAddinRecordType(actionId))
+        ...payload,
+        _id: recordId || payload?._id || "",
+        Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       }
     });
 
@@ -2522,7 +2501,11 @@ async function handleImportSubmit() {
       step: "resolve-attachment"
     });
 
-    const resolvedSelectedResume = await resolveAttachmentForImport(selectedResume);
+    const selectedResumeTask = resolveAttachmentForImport(selectedResume);
+    const resolvedDocumentAttachmentsTask = Promise.all(
+      documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
+    );
+    const resolvedSelectedResume = await selectedResumeTask;
     logEmailAddinRecordDebug("Attachment resolved", {
       fileName: resolvedSelectedResume?.name || "",
       contentType: resolvedSelectedResume?.contentType || "",
@@ -2530,7 +2513,10 @@ async function handleImportSubmit() {
       step: "parse-resume"
     });
 
-    const parsedResumeData = await parseResumeAttachment(resolvedSelectedResume);
+    const [parsedResumeData, resolvedDocumentAttachments] = await Promise.all([
+      parseResumeAttachment(resolvedSelectedResume),
+      resolvedDocumentAttachmentsTask
+    ]);
     logEmailAddinRecordDebug("Resume parsed", {
       fileName: resolvedSelectedResume?.name || "",
       hasParsedData: Boolean(parsedResumeData),
@@ -2538,9 +2524,7 @@ async function handleImportSubmit() {
       parsedLastName: String(parsedResumeData?.LastName || ""),
       step: "create-email-addin-record"
     });
-    const resolvedDocumentAttachments = await Promise.all(
-      documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
-    );
+
     const importedDocuments = await prepareImportDocuments(resolvedDocumentAttachments);
     logEmailAddinRecordDebug("Documents prepared", {
       count: importedDocuments.length,
@@ -2564,7 +2548,6 @@ async function handleImportSubmit() {
     });
 
     const recordId = String(payload?._id || "");
-    const emailAddinRecord = recordId ? await getEmailAddinRecord(recordId) : payload;
     logEmailAddinRecordDebug("Email add-in record loaded", {
       recordId,
       step: "create-outlook-import-session"
@@ -2575,9 +2558,9 @@ async function handleImportSubmit() {
       resumes: Array.isArray(parsedResumeData?.Resumes) ? parsedResumeData.Resumes : [],
       documents: importedDocuments,
       emailAddinRecord: {
-        ...emailAddinRecord,
-        _id: recordId || emailAddinRecord?._id || "",
-        Type: String(emailAddinRecord?.Type || getEmailAddinRecordType(actionId))
+        ...payload,
+        _id: recordId || payload?._id || "",
+        Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       },
       selectedResume: resumePreview
     });
