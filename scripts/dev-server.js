@@ -22,9 +22,12 @@ const ADDIN_PUBLIC_URL = process.env.ADDIN_PUBLIC_URL || "";
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || "100mb";
 const OUTLOOK_IMPORT_SESSION_TTL_MS = 15 * 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000);
+const EMAIL_ADDIN_RECORD_CACHE_PATH = path.join(__dirname, "..", ".email-addin-record-cache.json");
 const app = express();
 const outlookImportSessions = new Map();
 const emailAddinRecordCache = new Map();
+const emailAddinRecordDebugEvents = [];
+loadEmailAddinRecordCache();
 
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -171,6 +174,34 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
     return;
   }
 
+  recordEmailAddinDebugEvent("POST /api/EmailAddinRecord", {
+    type,
+    bodyLength: typeof emailData?.Body === "string" ? emailData.Body.length : 0,
+    bodyContainsHtml: looksLikeHtml(emailData?.Body),
+    bodyPreview: buildDebugBodyPreview(emailData?.Body),
+    hasBodyHtmlProperty: typeof emailData?.BodyHtml === "string" && emailData.BodyHtml.length > 0,
+    subject: typeof emailData?.Subject === "string" ? emailData.Subject : "",
+    documentCount: Array.isArray(documents) ? documents.length : 0,
+    documents: (Array.isArray(documents) ? documents : []).map((document) => ({
+      name: pickFirstString(document?.DocumentName, document?.DocumentDesc),
+      contentType: pickFirstString(document?.ContentType),
+      contentFormat: pickFirstString(document?.ContentFormat),
+      contentLength: typeof document?.Content === "string" ? document.Content.length : 0
+    }))
+  });
+
+  if (type === "email" && !looksLikeHtml(emailData?.Body)) {
+    res.status(400).json({
+      message:
+        "Linked email body must be saved as HTML in EmailData.Body. Reload the add-in and link the email again.",
+      details: {
+        bodyLength: typeof emailData?.Body === "string" ? emailData.Body.length : 0,
+        bodyContainsHtml: false
+      }
+    });
+    return;
+  }
+
   try {
     const requestPayload = buildEmailAddinRecordPayload(emailData, type, resumes, documents);
     const backendPayload = buildEmailAddinRecordPayload(emailData, type, null, null);
@@ -218,6 +249,30 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
       details: error instanceof Error ? error.message : String(error)
     });
   }
+});
+
+app.get("/api/debug/email-addin-records", (req, res) => {
+  res.json({
+    events: emailAddinRecordDebugEvents.slice(-50),
+    cachedRecords: Array.from(emailAddinRecordCache.values()).map((record) => ({
+      id: pickFirstString(record?._id, record?.id),
+      type: pickFirstString(record?.Type, record?.type),
+      subject: pickFirstString(record?.EmailData?.Subject, record?.emailData?.Subject),
+      bodyLength: typeof record?.EmailData?.Body === "string" ? record.EmailData.Body.length : 0,
+      bodyContainsHtml: looksLikeHtml(record?.EmailData?.Body),
+      bodyPreview: buildDebugBodyPreview(record?.EmailData?.Body),
+      hasBodyHtmlProperty:
+        typeof record?.EmailData?.BodyHtml === "string" && record.EmailData.BodyHtml.length > 0,
+      documents: (Array.isArray(record?.Documents) ? record.Documents : []).map((document) => ({
+        name: pickFirstString(document?.DocumentName, document?.DocumentDesc),
+        documentId: pickFirstString(document?.DocumentId),
+        documentGuid: pickFirstString(document?.DocumentGuid),
+        contentType: pickFirstString(document?.ContentType),
+        contentFormat: pickFirstString(document?.ContentFormat),
+        contentLength: typeof document?.Content === "string" ? document.Content.length : 0
+      }))
+    }))
+  });
 });
 
 app.get("/api/EmailAddinRecord/:recordId", async (req, res) => {
@@ -1047,6 +1102,30 @@ function sanitizeEmailAddinData(emailData) {
   };
 }
 
+function looksLikeHtml(value) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(value || ""));
+}
+
+function buildDebugBodyPreview(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+function recordEmailAddinDebugEvent(stage, details) {
+  const event = {
+    stage,
+    timestamp: new Date().toISOString(),
+    ...details
+  };
+  emailAddinRecordDebugEvents.push(event);
+  if (emailAddinRecordDebugEvents.length > 100) {
+    emailAddinRecordDebugEvents.shift();
+  }
+  console.log("[EmailAddinRecordDebug]", JSON.stringify(event));
+}
+
 function buildEmailAddinRecordPayload(emailData, type, resumes, documents) {
   return {
     EmailData: sanitizeEmailAddinData(emailData),
@@ -1129,7 +1208,46 @@ function cacheEmailAddinRecord(record) {
     return;
   }
 
-  emailAddinRecordCache.set(recordId, record);
+  const previousRecord = emailAddinRecordCache.get(recordId);
+  emailAddinRecordCache.set(recordId, mergeEmailAddinRecordWithCache(record, previousRecord));
+  persistEmailAddinRecordCache();
+}
+
+function loadEmailAddinRecordCache() {
+  try {
+    if (!fs.existsSync(EMAIL_ADDIN_RECORD_CACHE_PATH)) {
+      return;
+    }
+
+    const parsed = JSON.parse(fs.readFileSync(EMAIL_ADDIN_RECORD_CACHE_PATH, "utf8"));
+    const records = Array.isArray(parsed?.records) ? parsed.records : [];
+    records.forEach((record) => {
+      const normalizedRecord = normalizeEmailAddinRecord(record);
+      const recordId = pickFirstString(normalizedRecord?._id, normalizedRecord?.id);
+      if (recordId) {
+        emailAddinRecordCache.set(recordId, normalizedRecord);
+      }
+    });
+  } catch (error) {
+    console.warn(
+      "[EmailAddinRecordDebug] Unable to load local cache:",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+
+function persistEmailAddinRecordCache() {
+  try {
+    fs.writeFileSync(
+      EMAIL_ADDIN_RECORD_CACHE_PATH,
+      JSON.stringify({ records: Array.from(emailAddinRecordCache.values()) }, null, 2)
+    );
+  } catch (error) {
+    console.warn(
+      "[EmailAddinRecordDebug] Unable to persist local cache:",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
 }
 
 function mergeEmailAddinRecordWithCache(record, cachedRecord) {
@@ -1164,7 +1282,7 @@ function mergeEmailAddinEmailData(emailData, cachedEmailData) {
   const previousEmailData = sanitizeEmailAddinData(cachedEmailData);
 
   return {
-    Body: pickFirstString(nextEmailData?.Body, previousEmailData?.Body),
+    Body: pickPreferredHtmlString(nextEmailData?.Body, previousEmailData?.Body),
     BodyHtml: pickFirstString(nextEmailData?.BodyHtml, previousEmailData?.BodyHtml),
     Subject: pickFirstString(nextEmailData?.Subject, previousEmailData?.Subject),
     From: {
@@ -1391,6 +1509,13 @@ function pickFirstString(...values) {
   }
 
   return "";
+}
+
+function pickPreferredHtmlString(...values) {
+  const stringValues = values
+    .filter((value) => typeof value === "string" && value.trim())
+    .map((value) => value.trim());
+  return stringValues.find((value) => looksLikeHtml(value)) || stringValues[0] || "";
 }
 
 function sanitizeSingleRecipient(recipient) {

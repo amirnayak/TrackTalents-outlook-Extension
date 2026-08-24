@@ -392,6 +392,40 @@ function getImportableAttachments() {
     : [];
 }
 
+function getCurrentOfficeAttachmentsSnapshot() {
+  const item = window.Office?.context?.mailbox?.item;
+  const attachments = Array.isArray(item?.attachments)
+    ? item.attachments.map(normalizeOfficeAttachment)
+    : [];
+
+  if (attachments.length > 0 && state.currentItem) {
+    const attachmentNames = attachments.map((attachment) => attachment.name).filter(Boolean);
+    const resumeNames = attachmentNames.filter(isResumeFile);
+    state.currentItem.attachments = attachments;
+    state.currentItem.attachmentCount = attachments.length;
+    state.currentItem.attachmentNames = attachmentNames;
+    state.currentItem.hasResumeAttachment = resumeNames.length > 0;
+    state.currentItem.primaryResumeName = resumeNames[0] || "";
+  }
+
+  return attachments;
+}
+
+function getCurrentEmailAttachmentsForStorage() {
+  const liveAttachments = getCurrentOfficeAttachmentsSnapshot();
+  const currentAttachments = getImportableAttachments();
+  const attachmentsByKey = new Map();
+
+  [...currentAttachments, ...liveAttachments]
+    .filter((attachment) => attachment && !attachment.isInline)
+    .forEach((attachment, index) => {
+      const key = String(attachment.id || attachment.name || `attachment-${index}`);
+      attachmentsByKey.set(key, attachment);
+    });
+
+  return Array.from(attachmentsByKey.values());
+}
+
 function getSelectedImportResume() {
   return state.importModal.attachments.find(
     (attachment) => attachment.id === state.importModal.resumeAttachmentId
@@ -1589,8 +1623,25 @@ async function handleAttachEmailSubmit() {
   render();
 
   try {
-    const emailBody = await getCurrentEmailBodyForStorage();
-    const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
+    const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
+    logEmailAddinRecordDebug("Resolved linked email body", {
+      bodyLength: emailBody.length,
+      bodyContainsHtml: isProbablyHtmlBody(emailBody),
+      step: "attach-email"
+    });
+    const emailAttachments = getCurrentEmailAttachmentsForStorage();
+    logEmailAddinRecordDebug("Resolved linked email attachments", {
+      count: emailAttachments.length,
+      names: emailAttachments.map((attachment) => attachment?.name || "").filter(Boolean),
+      step: "attach-email"
+    });
+    const importedDocuments = await prepareEmailAddinDocuments(emailAttachments);
+    logEmailAddinRecordDebug("Linked email documents prepared", {
+      count: importedDocuments.length,
+      names: importedDocuments.map((document) => document?.DocumentName || "").filter(Boolean),
+      contentLengths: importedDocuments.map((document) => String(document?.Content || "").length),
+      step: "attach-email"
+    });
     const emailAddinRecord = await createEmailAddinRecord("email", {
       body: emailBody,
       subject: state.currentItem?.subject || "",
@@ -1883,18 +1934,25 @@ function readOfficeItemBody(coercionType, timeoutMs = 5000) {
   });
 }
 
-async function getCurrentEmailBodyForStorage() {
+async function getCurrentEmailBodyForStorage(options = {}) {
+  const requireHtml = Boolean(options.requireHtml);
   const currentHtml = toPlainString(state.currentItem?.bodyHtml).trim();
-  if (currentHtml) {
+  if (currentHtml && (!requireHtml || isProbablyHtmlBody(currentHtml))) {
     return currentHtml;
   }
 
   const officeHtml = await readOfficeItemBody(window.Office?.CoercionType?.Html);
-  if (officeHtml) {
+  if (officeHtml && (!requireHtml || isProbablyHtmlBody(officeHtml))) {
     if (state.currentItem) {
       state.currentItem.bodyHtml = officeHtml;
     }
     return officeHtml;
+  }
+
+  if (requireHtml) {
+    throw new Error(
+      "Unable to read the Outlook HTML body. Reload the add-in, select the email again, and link it once more."
+    );
   }
 
   const currentText = toPlainString(state.currentItem?.bodyPreview).trim();
@@ -1954,6 +2012,10 @@ function toPlainString(value) {
   }
 
   return "";
+}
+
+function isProbablyHtmlBody(value) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(value || ""));
 }
 
 function firstNonEmpty(...values) {
@@ -2268,11 +2330,16 @@ function buildOutlookActionImportPayload(actionId, options = {}) {
       subject: options.subject || state.currentItem?.subject || "",
       fromName: options.fromName || state.currentItem?.from?.displayName || "",
       fromEmail: options.fromEmail || state.currentItem?.from?.email || "",
-      bodyPreview:
+      bodyHtml:
         options.body ||
+        options.bodyHtml ||
         state.currentItem?.bodyHtml ||
+        "",
+      bodyPreview:
         options.bodyPreview ||
         state.currentItem?.bodyPreview ||
+        options.body ||
+        state.currentItem?.bodyHtml ||
         ""
     },
     parsedResumeData: options.parsedResumeData || null,
@@ -2375,7 +2442,7 @@ async function handleDirectActionLaunch(actionId) {
     state.launchMessage = "";
     render();
 
-    const emailBody = await getCurrentEmailBodyForStorage();
+    const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
     const emailParserTask = isEmailParserAction(actionId)
       ? parseCurrentEmailForAction(actionId)
           .then((parserResult) => {
@@ -2401,7 +2468,14 @@ async function handleDirectActionLaunch(actionId) {
             return buildEmailParserImportOptions(actionId, null, parserWarning);
           })
       : Promise.resolve({});
-    const importedDocumentsTask = prepareEmailAddinDocuments(getImportableAttachments());
+    const emailAttachments = getCurrentEmailAttachmentsForStorage();
+    logEmailAddinRecordDebug("Resolved action email attachments", {
+      actionId,
+      count: emailAttachments.length,
+      names: emailAttachments.map((attachment) => attachment?.name || "").filter(Boolean),
+      step: "create-email-addin-record"
+    });
+    const importedDocumentsTask = prepareEmailAddinDocuments(emailAttachments);
     const [emailParserImportOptions, importedDocuments] = await Promise.all([
       emailParserTask,
       importedDocumentsTask
@@ -2574,7 +2648,7 @@ async function handleImportSubmit() {
   const pendingLaunch = createPendingImportLaunch(actionId);
 
   try {
-    const emailBody = await getCurrentEmailBodyForStorage();
+    const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
