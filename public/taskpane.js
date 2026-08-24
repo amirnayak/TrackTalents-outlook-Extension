@@ -457,17 +457,10 @@ function getAttachEmailCurrentPage(type) {
 }
 
 function getAttachEmailPagerLabel(type) {
-  const total = getAttachEmailTotal(type);
   const currentPage = getAttachEmailCurrentPage(type);
   const pageCount = getAttachEmailPageCount(type);
 
-  if (total <= 0) {
-    return `Page ${currentPage + 1} of ${pageCount}`;
-  }
-
-  const first = currentPage * ATTACH_EMAIL_PAGE_SIZE + 1;
-  const last = Math.min(total, first + ATTACH_EMAIL_PAGE_SIZE - 1);
-  return `${first}-${last} of ${total} · Page ${currentPage + 1} of ${pageCount}`;
+  return `Page ${currentPage + 1} of ${pageCount}`;
 }
 
 function getAttachEmailRows(type) {
