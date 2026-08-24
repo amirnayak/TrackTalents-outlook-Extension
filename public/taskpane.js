@@ -51,7 +51,7 @@ const ACTIONS = [
 ];
 
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
-const ATTACH_EMAIL_PAGE_SIZE = 10;
+const ATTACH_EMAIL_PAGE_SIZE = 25;
 
 const state = {
   officeReady: false,
@@ -440,17 +440,34 @@ function getAttachEmailSelectedTotal() {
 }
 
 function getAttachEmailPageCount(type) {
-  const total =
-    type === "candidates"
-      ? Number(state.attachEmail.candidatesTotal || 0)
-      : Number(state.attachEmail.contactsTotal || 0);
+  const total = getAttachEmailTotal(type);
   return Math.max(1, Math.ceil(total / ATTACH_EMAIL_PAGE_SIZE));
+}
+
+function getAttachEmailTotal(type) {
+  return type === "candidates"
+    ? Number(state.attachEmail.candidatesTotal || 0)
+    : Number(state.attachEmail.contactsTotal || 0);
 }
 
 function getAttachEmailCurrentPage(type) {
   return type === "candidates"
     ? Number(state.attachEmail.candidatesPage || 0)
     : Number(state.attachEmail.contactsPage || 0);
+}
+
+function getAttachEmailPagerLabel(type) {
+  const total = getAttachEmailTotal(type);
+  const currentPage = getAttachEmailCurrentPage(type);
+  const pageCount = getAttachEmailPageCount(type);
+
+  if (total <= 0) {
+    return `Page ${currentPage + 1} of ${pageCount}`;
+  }
+
+  const first = currentPage * ATTACH_EMAIL_PAGE_SIZE + 1;
+  const last = Math.min(total, first + ATTACH_EMAIL_PAGE_SIZE - 1);
+  return `${first}-${last} of ${total} · Page ${currentPage + 1} of ${pageCount}`;
 }
 
 function getAttachEmailRows(type) {
@@ -913,6 +930,7 @@ function renderAttachEmailPanel() {
   const activeTab = state.attachEmail.activeTab;
   const currentPage = getAttachEmailCurrentPage(activeTab);
   const pageCount = getAttachEmailPageCount(activeTab);
+  const pagerLabel = getAttachEmailPagerLabel(activeTab);
   const hasSelection = getAttachEmailSelectedTotal() > 0;
   const submitLabel = state.attachEmail.submitting ? "Linking..." : "Link Email";
   const searchPlaceholder = "Search any column...";
@@ -982,7 +1000,7 @@ function renderAttachEmailPanel() {
               Prev
             </button>
             <span class="attach-email-pager-copy">
-              ${escapeHtml(`${currentPage + 1} / ${pageCount}`)}
+              ${escapeHtml(pagerLabel)}
             </span>
             <button
               type="button"
