@@ -1589,9 +1589,10 @@ async function handleAttachEmailSubmit() {
   render();
 
   try {
+    const emailBody = await getCurrentEmailBodyForStorage();
     const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
     const emailAddinRecord = await createEmailAddinRecord("email", {
-      body: state.currentItem?.bodyHtml || state.currentItem?.bodyPreview || "",
+      body: emailBody,
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -1847,6 +1848,75 @@ function buildEmailParserRequest(actionId) {
     thread_id: toPlainString(item.conversationId) || null,
     body: body || null
   };
+}
+
+function readOfficeItemBody(coercionType, timeoutMs = 5000) {
+  const item = window.Office?.context?.mailbox?.item;
+  if (!item?.body?.getAsync || !coercionType) {
+    return Promise.resolve("");
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve("");
+      }
+    }, timeoutMs);
+
+    item.body.getAsync(coercionType, (result) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      window.clearTimeout(timeout);
+
+      if (result.status === Office.AsyncResultStatus.Succeeded) {
+        resolve(String(result.value || "").trim());
+        return;
+      }
+
+      resolve("");
+    });
+  });
+}
+
+async function getCurrentEmailBodyForStorage() {
+  const currentHtml = toPlainString(state.currentItem?.bodyHtml).trim();
+  if (currentHtml) {
+    return currentHtml;
+  }
+
+  const officeHtml = await readOfficeItemBody(window.Office?.CoercionType?.Html);
+  if (officeHtml) {
+    if (state.currentItem) {
+      state.currentItem.bodyHtml = officeHtml;
+    }
+    return officeHtml;
+  }
+
+  const currentText = toPlainString(state.currentItem?.bodyPreview).trim();
+  if (currentText) {
+    return currentText;
+  }
+
+  const officeText = await readOfficeItemBody(window.Office?.CoercionType?.Text);
+  if (officeText) {
+    const normalizedText = officeText
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .trim();
+
+    if (state.currentItem) {
+      state.currentItem.bodyPreview = normalizedText;
+    }
+
+    return normalizedText;
+  }
+
+  return "";
 }
 
 async function parseCurrentEmailForAction(actionId) {
@@ -2305,6 +2375,7 @@ async function handleDirectActionLaunch(actionId) {
     state.launchMessage = "";
     render();
 
+    const emailBody = await getCurrentEmailBodyForStorage();
     const emailParserTask = isEmailParserAction(actionId)
       ? parseCurrentEmailForAction(actionId)
           .then((parserResult) => {
@@ -2351,7 +2422,7 @@ async function handleDirectActionLaunch(actionId) {
     });
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
-      body: state.currentItem?.bodyHtml || state.currentItem?.bodyPreview || "",
+      body: emailBody,
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -2503,6 +2574,7 @@ async function handleImportSubmit() {
   const pendingLaunch = createPendingImportLaunch(actionId);
 
   try {
+    const emailBody = await getCurrentEmailBodyForStorage();
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -2543,7 +2615,7 @@ async function handleImportSubmit() {
     });
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
-      body: state.currentItem?.bodyHtml || state.currentItem?.bodyPreview || "",
+      body: emailBody,
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
