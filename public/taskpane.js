@@ -1591,8 +1591,7 @@ async function handleAttachEmailSubmit() {
   try {
     const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
     const emailAddinRecord = await createEmailAddinRecord("email", {
-      body: state.currentItem?.bodyPreview || "",
-      bodyHtml: state.currentItem?.bodyHtml || "",
+      body: state.currentItem?.bodyHtml || state.currentItem?.bodyPreview || "",
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -2005,10 +2004,6 @@ function buildEmailParserImportOptions(actionId, parserResult, parserWarning = "
     options.subject = data.job_title;
   }
 
-  if (actionId === "add-job" && (data.job_description_raw || data.job_summary)) {
-    options.bodyPreview = data.job_description_raw || data.job_summary;
-  }
-
   return options;
 }
 
@@ -2101,14 +2096,14 @@ function logEmailAddinRecordDebug(stage, details) {
 
 function buildEmailAddinRecordRequest(type, options = {}) {
   const item = state.currentItem || {};
+  const body = String(options.body ?? item.bodyHtml ?? item.bodyPreview ?? "");
 
   return {
     type,
     resumes: Array.isArray(options.resumes) ? options.resumes : null,
     documents: buildDocumentPayload(options.documents),
     emailData: {
-      Body: String(options.body ?? item.bodyPreview ?? ""),
-      BodyHtml: String(options.bodyHtml ?? item.bodyHtml ?? ""),
+      Body: body,
       Subject: String(options.subject ?? item.subject ?? ""),
       From: {
         Name: String(options.fromName ?? item.from?.displayName ?? ""),
@@ -2203,8 +2198,12 @@ function buildOutlookActionImportPayload(actionId, options = {}) {
       subject: options.subject || state.currentItem?.subject || "",
       fromName: options.fromName || state.currentItem?.from?.displayName || "",
       fromEmail: options.fromEmail || state.currentItem?.from?.email || "",
-      bodyPreview: options.bodyPreview || state.currentItem?.bodyPreview || "",
-      bodyHtml: options.bodyHtml || state.currentItem?.bodyHtml || ""
+      bodyPreview:
+        options.body ||
+        state.currentItem?.bodyHtml ||
+        options.bodyPreview ||
+        state.currentItem?.bodyPreview ||
+        ""
     },
     parsedResumeData: options.parsedResumeData || null,
     resumes: Array.isArray(options.resumes) ? options.resumes : [],
@@ -2352,8 +2351,7 @@ async function handleDirectActionLaunch(actionId) {
     });
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
-      body: state.currentItem?.bodyPreview || "",
-      bodyHtml: state.currentItem?.bodyHtml || "",
+      body: state.currentItem?.bodyHtml || state.currentItem?.bodyPreview || "",
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -2545,8 +2543,7 @@ async function handleImportSubmit() {
     });
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
-      body: state.currentItem?.bodyPreview || "",
-      bodyHtml: state.currentItem?.bodyHtml || "",
+      body: state.currentItem?.bodyHtml || state.currentItem?.bodyPreview || "",
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
