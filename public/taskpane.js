@@ -2203,7 +2203,8 @@ function buildOutlookActionImportPayload(actionId, options = {}) {
       subject: options.subject || state.currentItem?.subject || "",
       fromName: options.fromName || state.currentItem?.from?.displayName || "",
       fromEmail: options.fromEmail || state.currentItem?.from?.email || "",
-      bodyPreview: options.bodyPreview || state.currentItem?.bodyPreview || ""
+      bodyPreview: options.bodyPreview || state.currentItem?.bodyPreview || "",
+      bodyHtml: options.bodyHtml || state.currentItem?.bodyHtml || ""
     },
     parsedResumeData: options.parsedResumeData || null,
     resumes: Array.isArray(options.resumes) ? options.resumes : [],
