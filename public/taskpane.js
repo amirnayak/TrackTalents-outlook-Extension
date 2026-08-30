@@ -2336,6 +2336,8 @@ function buildOutlookActionImportPayload(actionId, options = {}) {
     messageId: String(options.messageId ?? item.messageId ?? item.itemId ?? ""),
     selectedResumeName: options.selectedResume?.FileName || "",
     emailContext: {
+      contextId: String(options.contextId ?? formatContextId(item)),
+      messageId: String(options.messageId ?? item.messageId ?? item.itemId ?? ""),
       subject: options.subject || item.subject || "",
       fromName: options.fromName || item.from?.displayName || "",
       fromEmail: options.fromEmail || item.from?.email || "",
