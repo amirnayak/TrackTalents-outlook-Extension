@@ -1097,6 +1097,16 @@ function sanitizeEmailAddinData(emailData) {
       : typeof emailData?.subject === "string"
         ? emailData.subject
         : "",
+    ContextId: typeof emailData?.ContextId === "string"
+      ? emailData.ContextId
+      : typeof emailData?.contextId === "string"
+        ? emailData.contextId
+        : "",
+    MessageId: typeof emailData?.MessageId === "string"
+      ? emailData.MessageId
+      : typeof emailData?.messageId === "string"
+        ? emailData.messageId
+        : "",
     From: sanitizeSingleRecipient(emailData?.From ?? emailData?.from),
     To: sanitizeRecipientList(emailData?.To ?? emailData?.to)
   };
@@ -1285,6 +1295,8 @@ function mergeEmailAddinEmailData(emailData, cachedEmailData) {
     Body: pickPreferredHtmlString(nextEmailData?.Body, previousEmailData?.Body),
     BodyHtml: pickFirstString(nextEmailData?.BodyHtml, previousEmailData?.BodyHtml),
     Subject: pickFirstString(nextEmailData?.Subject, previousEmailData?.Subject),
+    ContextId: pickFirstString(nextEmailData?.ContextId, previousEmailData?.ContextId),
+    MessageId: pickFirstString(nextEmailData?.MessageId, previousEmailData?.MessageId),
     From: {
       Name: pickFirstString(nextEmailData?.From?.Name, previousEmailData?.From?.Name),
       Email: pickFirstString(nextEmailData?.From?.Email, previousEmailData?.From?.Email)

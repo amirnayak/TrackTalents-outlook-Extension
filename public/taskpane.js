@@ -10,7 +10,7 @@ const ACTIONS = [
     id: "submit-resume-contact",
     label: "Submit Resume To Contact",
     iconSrc: "/assets/action-icons/submit-resume-contact.png",
-    path: "/contacts",
+    path: "/candidates",
     intent: "submit-resume-contact"
   },
   {
@@ -38,7 +38,7 @@ const ACTIONS = [
     id: "source-resume-job",
     label: "Source Resume To Job",
     iconSrc: "/assets/action-icons/source-resume-job.png",
-    path: "/local-search",
+    path: "/candidates",
     intent: "source-resume-job"
   },
   // {
@@ -170,6 +170,7 @@ function buildPreviewItem() {
 
   return {
     itemId: "preview-mail-001",
+    messageId: "preview-mail-001",
     subject: "Senior Java Developer Resume - Ananya Sharma",
     from: {
       displayName: "Ananya Sharma",
@@ -2229,6 +2230,8 @@ function logEmailAddinRecordDebug(stage, details) {
 function buildEmailAddinRecordRequest(type, options = {}) {
   const item = state.currentItem || {};
   const body = String(options.body ?? item.bodyHtml ?? item.bodyPreview ?? "");
+  const contextId = String(options.contextId ?? formatContextId(item));
+  const messageId = String(options.messageId ?? item.messageId ?? item.itemId ?? "");
 
   return {
     type,
@@ -2244,7 +2247,9 @@ function buildEmailAddinRecordRequest(type, options = {}) {
       To: normalizeRecipientList(options.toRecipients ?? item.to).map((recipient) => ({
         Name: recipient.displayName,
         Email: recipient.email
-      }))
+      })),
+      ContextId: contextId,
+      MessageId: messageId
     }
   };
 }
@@ -2321,34 +2326,61 @@ function buildTargetPath(actionId) {
 }
 
 function buildOutlookActionImportPayload(actionId, options = {}) {
+  const item = state.currentItem || {};
+
   return {
     actionId,
     source: "outlook-addin",
     importedAt: new Date().toISOString(),
+    contextId: String(options.contextId ?? formatContextId(item)),
+    messageId: String(options.messageId ?? item.messageId ?? item.itemId ?? ""),
     selectedResumeName: options.selectedResume?.FileName || "",
     emailContext: {
-      subject: options.subject || state.currentItem?.subject || "",
-      fromName: options.fromName || state.currentItem?.from?.displayName || "",
-      fromEmail: options.fromEmail || state.currentItem?.from?.email || "",
+      subject: options.subject || item.subject || "",
+      fromName: options.fromName || item.from?.displayName || "",
+      fromEmail: options.fromEmail || item.from?.email || "",
       bodyHtml:
         options.body ||
         options.bodyHtml ||
-        state.currentItem?.bodyHtml ||
+        item.bodyHtml ||
         "",
       bodyPreview:
         options.bodyPreview ||
-        state.currentItem?.bodyPreview ||
+        item.bodyPreview ||
         options.body ||
-        state.currentItem?.bodyHtml ||
+        item.bodyHtml ||
         ""
     },
     parsedResumeData: options.parsedResumeData || null,
     resumes: Array.isArray(options.resumes) ? options.resumes : [],
     documents: Array.isArray(options.documents) ? options.documents : [],
+    attachments: Array.isArray(options.attachments) ? options.attachments : [],
     emailAddinRecord: options.emailAddinRecord || null,
     selectedResume: options.selectedResume || null,
     emailParserResult: options.emailParserResult || null,
     warnings: Array.isArray(options.warnings) ? options.warnings : []
+  };
+}
+
+function buildEmailAttachmentBridgePayload(attachment) {
+  if (!attachment || typeof attachment !== "object") {
+    return null;
+  }
+
+  const attachmentName = String(attachment.name || attachment.DocumentName || "").trim();
+  const attachmentBinary = String(attachment.content || attachment.Content || "").trim();
+
+  if (!attachmentName || !attachmentBinary) {
+    return null;
+  }
+
+  return {
+    AttachmentName: attachmentName,
+    AttachmentBinary: attachmentBinary,
+    ContentType: String(
+      attachment.contentType || attachment.ContentType || "application/octet-stream"
+    ),
+    Size: Number(attachment.size || attachment.Size || 0)
   };
 }
 
@@ -2379,23 +2411,6 @@ function buildAuthBridgeUrl(actionId, bridgeData = {}) {
   });
 
   return `${buildAbsoluteAppUrl(state.config.authBridgePath)}#${hash.toString()}`;
-}
-
-function createPendingImportLaunch(actionId) {
-  const sessionId =
-    typeof window.crypto?.randomUUID === "function"
-      ? window.crypto.randomUUID()
-      : `outlook-import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  launchAction(actionId, {
-    outlookImportSessionId: sessionId,
-    outlookImportApiHost: window.location.origin
-  });
-
-  return {
-    sessionId,
-    apiHost: window.location.origin
-  };
 }
 
 function safeOpenWindow(url) {
@@ -2435,8 +2450,6 @@ async function handleDirectActionLaunch(actionId) {
     render();
     return;
   }
-
-  const pendingLaunch = createPendingImportLaunch(actionId);
 
   try {
     state.launchMessage = "";
@@ -2521,10 +2534,7 @@ async function handleDirectActionLaunch(actionId) {
       }
     });
 
-    const importSession = await updateOutlookImportSession(
-      pendingLaunch.sessionId,
-      outlookActionImport
-    );
+    const importSession = await createOutlookImportSession(outlookActionImport);
 
     logEmailAddinRecordDebug("Outlook import session created", {
       actionId,
@@ -2532,10 +2542,10 @@ async function handleDirectActionLaunch(actionId) {
       step: "launch-action"
     });
 
-    state.launchMessage = "";
-    state.showLoginModal = false;
-    closeImportModal();
-    render();
+    launchAction(actionId, {
+      outlookImportSessionId: importSession.sessionId,
+      outlookImportApiHost: importSession.apiHost
+    });
   } catch (error) {
     logEmailAddinRecordDebug("Submit error", {
       actionId,
@@ -2645,8 +2655,6 @@ async function handleImportSubmit() {
   state.importModal.error = "";
   render();
 
-  const pendingLaunch = createPendingImportLaunch(actionId);
-
   try {
     const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
     logEmailAddinRecordDebug("Submit start", {
@@ -2708,10 +2716,15 @@ async function handleImportSubmit() {
       step: "create-outlook-import-session"
     });
     const resumePreview = buildResumeBridgePreview(resolvedSelectedResume);
+    const emailAttachments = [
+      buildEmailAttachmentBridgePayload(resolvedSelectedResume),
+      ...resolvedDocumentAttachments.map(buildEmailAttachmentBridgePayload)
+    ].filter(Boolean);
     const outlookCandidateImport = buildOutlookActionImportPayload(actionId, {
       parsedResumeData: parsedResumeData || null,
       resumes: Array.isArray(parsedResumeData?.Resumes) ? parsedResumeData.Resumes : [],
       documents: importedDocuments,
+      attachments: emailAttachments,
       emailAddinRecord: {
         ...payload,
         _id: recordId || payload?._id || "",
@@ -2719,19 +2732,16 @@ async function handleImportSubmit() {
       },
       selectedResume: resumePreview
     });
-    const importSession = await updateOutlookImportSession(
-      pendingLaunch.sessionId,
-      outlookCandidateImport
-    );
+    const importSession = await createOutlookImportSession(outlookCandidateImport);
     logEmailAddinRecordDebug("Outlook import session created", {
       sessionId: importSession.sessionId,
       step: "launch-action"
     });
 
-    state.launchMessage = "";
-    state.showLoginModal = false;
-    closeImportModal();
-    render();
+    launchAction(actionId, {
+      outlookImportSessionId: importSession.sessionId,
+      outlookImportApiHost: importSession.apiHost
+    });
   } catch (error) {
     logEmailAddinRecordDebug("Submit error", {
       message: error instanceof Error ? error.message : String(error)
@@ -2785,6 +2795,7 @@ function setItemStateFromOffice(item) {
 
   state.currentItem = {
     itemId: toPlainString(item.itemId) || toPlainString(item.internetMessageId),
+    messageId: toPlainString(item.internetMessageId) || toPlainString(item.itemId),
     subject: toPlainString(item.subject),
     from: item.from
       ? {
