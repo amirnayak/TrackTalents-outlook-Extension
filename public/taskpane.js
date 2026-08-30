@@ -206,11 +206,7 @@ function isAddCandidateAction(actionId) {
 }
 
 function isResumeImportAction(actionId) {
-  return (
-    actionId === "add-candidate" ||
-    actionId === "submit-resume-contact" ||
-    actionId === "source-resume-job"
-  );
+  return actionId === "add-candidate";
 }
 
 function isAttachEmailAction(actionId) {
