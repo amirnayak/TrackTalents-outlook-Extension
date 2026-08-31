@@ -71,6 +71,7 @@ const state = {
   loginSubmitting: false,
   pendingActionId: null,
   showLoginModal: false,
+  sessionNoticeOpen: false,
   attachEmail: buildAttachEmailState(),
   importModal: buildImportModalState(),
   loginForm: {
@@ -303,13 +304,32 @@ function persistAuth(auth) {
   }
 }
 
+function isTokenExpired(auth = state.auth) {
+  const tokenExpiration = Number(auth?.tokenExpiration || 0);
+
+  return Boolean(tokenExpiration && tokenExpiration <= Date.now());
+}
+
+function openSessionExpiredNotice(actionId = "") {
+  state.pendingActionId = actionId || state.pendingActionId || null;
+  state.sessionNoticeOpen = true;
+  state.showLoginModal = false;
+  state.loginError = "";
+  state.loginSubmitting = false;
+  state.launchMessage = "";
+  closeAttachEmailPanel();
+  closeImportModal();
+  render();
+}
+
 function isAuthenticated() {
   return Boolean(
     state.auth?.email &&
       state.auth?.accessToken &&
       state.auth?.loginData &&
       (state.auth?.userId || state.auth?.loginData?.userId || state.auth?.loginData?.UserId) &&
-      (state.auth?.mId || state.auth?.loginData?.MId)
+      (state.auth?.mId || state.auth?.loginData?.MId) &&
+      !isTokenExpired(state.auth)
   );
 }
 
@@ -1148,6 +1168,35 @@ function renderLoginModal() {
   `;
 }
 
+function renderSessionExpiredModal() {
+  return `
+    <div class="modal-overlay" role="presentation">
+      <section class="login-dialog session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-expired-title">
+        <div class="login-header">
+          <div>
+            <p class="section-label">Session Expired</p>
+            <h2 id="session-expired-title">Please log in again</h2>
+          </div>
+          <button id="close-session-notice-button" class="icon-button" type="button" aria-label="Close session expired notice">X</button>
+        </div>
+
+        <div class="session-notice">
+          <div class="session-notice-icon" aria-hidden="true">i</div>
+          <p class="login-copy">
+            Your TrackTalents Outlook token has expired. Please log in again to continue using Add Candidate, Add Job, Link Emails, Submit Resume, or Source Resume.
+          </p>
+        </div>
+
+        <div class="login-actions session-actions">
+          <button id="session-login-button" class="primary-button" type="button">
+            Log in again
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function renderImportAttachmentRow(attachment) {
   const isResume = attachment.id === state.importModal.resumeAttachmentId;
 
@@ -1336,6 +1385,7 @@ function render() {
     </main>
 
     ${state.showLoginModal ? renderLoginModal() : ""}
+    ${state.sessionNoticeOpen ? renderSessionExpiredModal() : ""}
     ${state.attachEmail.open ? renderAttachEmailPanel() : ""}
     ${state.importModal.open ? renderImportModal() : ""}
   `;
@@ -1378,6 +1428,7 @@ function bindEvents() {
       state.auth = null;
       state.pendingActionId = null;
       state.showLoginModal = false;
+      state.sessionNoticeOpen = false;
       state.loginError = "";
       state.loginSubmitting = false;
       state.loginForm.password = "";
@@ -1393,6 +1444,25 @@ function bindEvents() {
   if (closeLoginButton) {
     closeLoginButton.addEventListener("click", () => {
       state.showLoginModal = false;
+      state.loginError = "";
+      render();
+    });
+  }
+
+  const closeSessionNoticeButton = document.getElementById("close-session-notice-button");
+  if (closeSessionNoticeButton) {
+    closeSessionNoticeButton.addEventListener("click", () => {
+      state.sessionNoticeOpen = false;
+      state.pendingActionId = null;
+      render();
+    });
+  }
+
+  const sessionLoginButton = document.getElementById("session-login-button");
+  if (sessionLoginButton) {
+    sessionLoginButton.addEventListener("click", () => {
+      state.sessionNoticeOpen = false;
+      state.showLoginModal = true;
       state.loginError = "";
       render();
     });
@@ -1591,6 +1661,11 @@ function bindEvents() {
         return;
       }
 
+      if (isTokenExpired(state.auth)) {
+        openSessionExpiredNotice(actionId);
+        return;
+      }
+
       if (!isAuthenticated()) {
         state.pendingActionId = actionId;
         state.showLoginModal = true;
@@ -1608,6 +1683,20 @@ function bindEvents() {
 async function handleAttachEmailSubmit() {
   const contactCount = state.attachEmail.selectedContacts.length;
   const candidateCount = state.attachEmail.selectedCandidates.length;
+
+  if (isTokenExpired(state.auth)) {
+    openSessionExpiredNotice("attach-email");
+    return;
+  }
+
+  if (!state.auth?.accessToken) {
+    state.pendingActionId = "attach-email";
+    state.showLoginModal = true;
+    state.loginError = "";
+    closeAttachEmailPanel();
+    render();
+    return;
+  }
 
   if (!contactCount && !candidateCount) {
     state.attachEmail.error = "Select at least one contact or candidate before attaching this email.";
@@ -1739,6 +1828,7 @@ async function handleLoginSubmit(event) {
     state.loginSubmitting = false;
     state.loginError = "";
     state.showLoginModal = false;
+    state.sessionNoticeOpen = false;
     state.loginForm.password = "";
     state.launchMessage = "";
 
@@ -2443,8 +2533,15 @@ function launchAction(actionId, options = {}) {
 }
 
 async function handleDirectActionLaunch(actionId) {
+  if (isTokenExpired(state.auth)) {
+    openSessionExpiredNotice(actionId);
+    return;
+  }
+
   if (!state.auth?.accessToken) {
-    state.loginError = "Your TrackTalents session expired. Please sign in again.";
+    state.pendingActionId = actionId;
+    state.showLoginModal = true;
+    state.loginError = "";
     render();
     return;
   }
@@ -2644,8 +2741,16 @@ async function handleImportSubmit() {
   }
 
   if (!state.auth?.accessToken) {
-    state.importModal.error = "Your TrackTalents session expired. Please sign in again.";
+    state.pendingActionId = actionId;
+    state.showLoginModal = true;
+    state.loginError = "";
+    closeImportModal();
     render();
+    return;
+  }
+
+  if (isTokenExpired(state.auth)) {
+    openSessionExpiredNotice(actionId);
     return;
   }
 

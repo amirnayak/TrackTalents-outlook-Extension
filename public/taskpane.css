@@ -221,6 +221,7 @@ input {
   flex-direction: column;
   min-height: 0;
   padding: 0 12px 12px;
+  background: linear-gradient(180deg, #f7f3ff 0%, #fbf9ff 100%);
 }
 
 .actions-surface {
@@ -228,11 +229,10 @@ input {
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  border: 1px solid rgba(170, 138, 255, 0.2);
+  border: 1px solid rgba(141, 89, 255, 0.1);
   border-radius: 18px 18px 24px 24px;
-  background:
-    linear-gradient(180deg, rgba(29, 16, 55, 0.96) 0%, rgba(22, 12, 43, 0.96) 100%);
-  box-shadow: 0 16px 38px rgba(7, 3, 17, 0.28);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 32px rgba(55, 37, 108, 0.05);
   padding: 10px 10px 12px;
 }
 
@@ -257,8 +257,8 @@ input {
 }
 
 .action-button {
-  --button-tint: rgba(158, 108, 255, 0.18);
-  --button-glow: rgba(158, 108, 255, 0.24);
+  --button-tint: rgba(144, 91, 255, 0.09);
+  --button-glow: rgba(144, 91, 255, 0.12);
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -268,17 +268,17 @@ input {
   gap: 12px;
   width: 100%;
   min-height: 54px;
-  border: 1px solid rgba(173, 145, 255, 0.18);
+  border: 1px solid rgba(129, 104, 204, 0.13);
   border-radius: 18px;
   padding: 9px 12px;
   background:
-    linear-gradient(90deg, rgba(43, 24, 82, 0.98) 0%, rgba(34, 18, 67, 0.98) 76%, rgba(55, 30, 101, 0.98) 100%);
+    linear-gradient(90deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.98) 76%, rgba(248, 244, 255, 0.98) 100%);
   color: inherit;
   text-align: left;
   cursor: pointer;
   box-shadow:
-    0 8px 18px rgba(7, 3, 17, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 6px 16px rgba(36, 24, 78, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transition:
     transform 140ms ease,
     border-color 140ms ease,
@@ -318,11 +318,11 @@ input {
 
 .action-button:hover {
   background:
-    linear-gradient(90deg, rgba(53, 30, 101, 1) 0%, rgba(44, 24, 86, 0.98) 78%, rgba(63, 35, 116, 0.98) 100%);
-  border-color: rgba(185, 158, 255, 0.28);
+    linear-gradient(90deg, rgba(255, 255, 255, 1) 0%, rgba(250, 247, 255, 0.98) 78%, rgba(244, 238, 255, 0.98) 100%);
+  border-color: rgba(105, 65, 198, 0.2);
   box-shadow:
-    0 12px 24px rgba(8, 3, 20, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    0 10px 22px rgba(65, 42, 128, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
   transform: translateY(-1px);
 }
 
@@ -338,18 +338,18 @@ input {
 }
 
 .action-button:nth-child(2n) {
-  --button-tint: rgba(109, 156, 255, 0.16);
-  --button-glow: rgba(109, 156, 255, 0.2);
+  --button-tint: rgba(88, 134, 255, 0.1);
+  --button-glow: rgba(88, 134, 255, 0.14);
 }
 
 .action-button:nth-child(3n) {
-  --button-tint: rgba(87, 182, 155, 0.16);
-  --button-glow: rgba(87, 182, 155, 0.2);
+  --button-tint: rgba(104, 199, 148, 0.1);
+  --button-glow: rgba(104, 199, 148, 0.14);
 }
 
 .action-button:nth-child(4n) {
-  --button-tint: rgba(240, 162, 88, 0.18);
-  --button-glow: rgba(240, 162, 88, 0.22);
+  --button-tint: rgba(245, 164, 78, 0.11);
+  --button-glow: rgba(245, 164, 78, 0.16);
 }
 
 .action-icon {
@@ -361,12 +361,12 @@ input {
   flex: 0 0 40px;
   border-radius: 13px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(237, 231, 255, 0.84)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.78)),
     var(--button-tint);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(105, 65, 198, 0.08);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    0 6px 14px rgba(8, 3, 20, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 5px 12px rgba(48, 33, 90, 0.05);
 }
 
 .action-icon-image {
@@ -389,7 +389,7 @@ input {
   font-size: 11.5px;
   line-height: 1.2;
   font-weight: 700;
-  color: #ffffff;
+  color: #2b1e47;
   text-align: left;
 }
 
@@ -528,6 +528,40 @@ input {
   background: #f7f3ff;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.session-notice {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 14px;
+  border: 1px solid rgba(154, 97, 255, 0.18);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(154, 97, 255, 0.12);
+}
+
+.session-notice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--accent-deep);
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(7, 3, 17, 0.16);
+}
+
+.session-notice .login-copy {
+  margin: 0;
+}
+
+.session-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .login-form {
