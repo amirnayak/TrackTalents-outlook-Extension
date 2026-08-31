@@ -5,14 +5,14 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>e8fcc88e-e7a0-47d2-a629-65872118f7f9</Id>
-  <Version>1.0.2.0</Version>
+  <Version>1.0.3.0</Version>
   <ProviderName>TrackTalents</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="TrackTalents Outlook" />
   <Description DefaultValue="TrackTalents Outlook add-in for email-driven recruiting workflows." />
   <IconUrl DefaultValue="https://localhost:3201/assets/icon-64.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3201/assets/icon-80.png" />
-  <SupportUrl DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
+  <SupportUrl DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
   <AppDomains>
     <AppDomain>https://localhost:3201</AppDomain>
   </AppDomains>
@@ -27,13 +27,13 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
+        <SourceLocation DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
+        <SourceLocation DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -109,8 +109,8 @@
         <bt:Image id="Icon.80" DefaultValue="https://localhost:3201/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
-        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="TrackTalents" />
@@ -188,8 +188,8 @@
           <bt:Image id="Icon.80" DefaultValue="https://localhost:3201/assets/icon-80.png" />
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
-          <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260830" />
+          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3201/taskpane.html?v=20260831" />
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="TrackTalents" />
