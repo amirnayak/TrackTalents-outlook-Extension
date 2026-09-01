@@ -2492,6 +2492,19 @@ function buildEmailAttachmentBridgePayload(attachment) {
   };
 }
 
+function buildInlineOutlookImportFallback(outlookImport) {
+  if (!outlookImport || typeof outlookImport !== "object") {
+    return null;
+  }
+
+  return {
+    ...outlookImport,
+    // Raw attachment binaries can make the bridge URL too large. The session keeps the full payload.
+    attachments: [],
+    selectedResume: outlookImport.selectedResume || null
+  };
+}
+
 function buildAuthBridgeUrl(actionId, bridgeData = {}) {
   const redirectTo = buildTargetPath(actionId);
   const bridgeLoginData = buildBridgeLoginData();
@@ -2658,6 +2671,7 @@ async function handleDirectActionLaunch(actionId) {
     });
 
     launchAction(actionId, {
+      outlookCandidateImport: buildInlineOutlookImportFallback(outlookActionImport),
       outlookImportSessionId: importSession.sessionId,
       outlookImportApiHost: importSession.apiHost
     });
@@ -2862,6 +2876,7 @@ async function handleImportSubmit() {
     });
 
     launchAction(actionId, {
+      outlookCandidateImport: buildInlineOutlookImportFallback(outlookCandidateImport),
       outlookImportSessionId: importSession.sessionId,
       outlookImportApiHost: importSession.apiHost
     });
