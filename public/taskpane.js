@@ -177,6 +177,12 @@ function buildPreviewItem() {
       displayName: "Ananya Sharma",
       email: "ananya.sharma@example.com"
     },
+    replyTo: [
+      {
+        displayName: "Ananya Sharma",
+        email: "ananya.sharma@example.com"
+      }
+    ],
     to: [
       {
         displayName: "TrackTalents Hiring",
@@ -401,6 +407,10 @@ function normalizeRecipientList(recipients) {
   return recipients
     .map(normalizeRecipient)
     .filter((recipient) => recipient.displayName || recipient.email);
+}
+
+function getPrimaryRecipient(recipients) {
+  return normalizeRecipientList(recipients)[0] || { displayName: "", email: "" };
 }
 
 function getImportableAttachments() {
@@ -1858,6 +1868,8 @@ function buildLaunchContext(action) {
     subject: item.subject || "",
     fromName: item.from?.displayName || "",
     fromEmail: item.from?.email || "",
+    replyToName: getPrimaryRecipient(item.replyTo).displayName,
+    replyToEmail: getPrimaryRecipient(item.replyTo).email,
     attachmentCount: String(item.attachmentCount || 0),
     hasResume: item.hasResumeAttachment ? "true" : "false",
     resumeFile: item.primaryResumeName || "",
@@ -2318,6 +2330,7 @@ function buildEmailAddinRecordRequest(type, options = {}) {
   const body = String(options.body ?? item.bodyHtml ?? item.bodyPreview ?? "");
   const contextId = String(options.contextId ?? formatContextId(item));
   const messageId = String(options.messageId ?? item.messageId ?? item.itemId ?? "");
+  const replyTo = getPrimaryRecipient(options.replyToRecipients ?? item.replyTo);
 
   return {
     type,
@@ -2329,6 +2342,10 @@ function buildEmailAddinRecordRequest(type, options = {}) {
       From: {
         Name: String(options.fromName ?? item.from?.displayName ?? ""),
         Email: String(options.fromEmail ?? item.from?.email ?? "")
+      },
+      ReplyTo: {
+        Name: replyTo.displayName,
+        Email: replyTo.email
       },
       To: normalizeRecipientList(options.toRecipients ?? item.to).map((recipient) => ({
         Name: recipient.displayName,
@@ -2413,6 +2430,7 @@ function buildTargetPath(actionId) {
 
 function buildOutlookActionImportPayload(actionId, options = {}) {
   const item = state.currentItem || {};
+  const replyTo = getPrimaryRecipient(options.replyToRecipients ?? item.replyTo);
 
   return {
     actionId,
@@ -2427,6 +2445,8 @@ function buildOutlookActionImportPayload(actionId, options = {}) {
       subject: options.subject || item.subject || "",
       fromName: options.fromName || item.from?.displayName || "",
       fromEmail: options.fromEmail || item.from?.email || "",
+      replyToName: options.replyToName || replyTo.displayName || "",
+      replyToEmail: options.replyToEmail || replyTo.email || "",
       bodyHtml:
         options.body ||
         options.bodyHtml ||
@@ -2895,6 +2915,7 @@ function setItemStateFromOffice(item) {
     ? `${item.from.displayName || "Unknown"} <${item.from.emailAddress}>`
     : "Unavailable in this mode";
   const toRecipients = normalizeRecipientList(item.to);
+  const replyToRecipients = normalizeRecipientList(item.replyTo);
 
   state.currentItem = {
     itemId: toPlainString(item.itemId) || toPlainString(item.internetMessageId),
@@ -2906,6 +2927,7 @@ function setItemStateFromOffice(item) {
           email: toPlainString(item.from.emailAddress)
         }
       : { displayName: "", email: "" },
+    replyTo: replyToRecipients,
     to: toRecipients,
     fromDisplay,
     toCount: toRecipients.length,

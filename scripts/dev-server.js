@@ -1108,6 +1108,7 @@ function sanitizeEmailAddinData(emailData) {
         ? emailData.messageId
         : "",
     From: sanitizeSingleRecipient(emailData?.From ?? emailData?.from),
+    ReplyTo: sanitizeSingleRecipient(emailData?.ReplyTo ?? emailData?.replyTo),
     To: sanitizeRecipientList(emailData?.To ?? emailData?.to)
   };
 }
@@ -1300,6 +1301,10 @@ function mergeEmailAddinEmailData(emailData, cachedEmailData) {
     From: {
       Name: pickFirstString(nextEmailData?.From?.Name, previousEmailData?.From?.Name),
       Email: pickFirstString(nextEmailData?.From?.Email, previousEmailData?.From?.Email)
+    },
+    ReplyTo: {
+      Name: pickFirstString(nextEmailData?.ReplyTo?.Name, previousEmailData?.ReplyTo?.Name),
+      Email: pickFirstString(nextEmailData?.ReplyTo?.Email, previousEmailData?.ReplyTo?.Email)
     },
     To:
       Array.isArray(nextEmailData?.To) && nextEmailData.To.length > 0
