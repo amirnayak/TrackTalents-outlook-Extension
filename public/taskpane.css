@@ -588,10 +588,23 @@ input {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0 14px;
-  background: white;
-  color: var(--text);
+  background: #ffffff;
+  color: #1d1533;
+  caret-color: var(--accent-deep);
   font-size: var(--ui-copy-size);
   font-family: var(--ui-font-family);
+}
+
+.field input::placeholder {
+  color: #6f6685;
+  opacity: 1;
+}
+
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:hover,
+.field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1d1533;
+  box-shadow: 0 0 0 1000px #ffffff inset;
 }
 
 .field input:focus {
