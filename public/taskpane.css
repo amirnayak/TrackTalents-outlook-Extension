@@ -612,6 +612,28 @@ input {
   border-color: var(--accent);
 }
 
+.login-dialog .field input,
+.login-dialog .field input[type="email"],
+.login-dialog .field input[type="password"] {
+  background-color: #ffffff !important;
+  color: #140b26 !important;
+  -webkit-text-fill-color: #140b26 !important;
+  caret-color: #6f3fe2 !important;
+}
+
+.login-dialog .field input::placeholder {
+  color: #3b3156 !important;
+  -webkit-text-fill-color: #3b3156 !important;
+  opacity: 1 !important;
+}
+
+.login-dialog .field input:-webkit-autofill,
+.login-dialog .field input:-webkit-autofill:hover,
+.login-dialog .field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #140b26 !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+}
+
 .remember-row {
   display: inline-flex;
   align-items: center;
