@@ -7,6 +7,13 @@ const ACTIONS = [
     intent: "create-candidate"
   },
   {
+    id: "source-resume-job",
+    label: "Source Resume To Job",
+    iconSrc: "/assets/action-icons/source-resume-job.png",
+    path: "/candidates",
+    intent: "source-resume-job"
+  },
+  {
     id: "submit-resume-contact",
     label: "Submit Resume To Contact",
     iconSrc: "/assets/action-icons/submit-resume-contact.png",
@@ -33,13 +40,6 @@ const ACTIONS = [
     iconSrc: "/assets/action-icons/add-contact.png",
     path: "/contacts",
     intent: "create-contact"
-  },
-  {
-    id: "source-resume-job",
-    label: "Source Resume To Job",
-    iconSrc: "/assets/action-icons/source-resume-job.png",
-    path: "/candidates",
-    intent: "source-resume-job"
   },
   // {
   //   id: "reply-all",
@@ -221,7 +221,11 @@ function isAttachEmailAction(actionId) {
 }
 
 function isEmailParserAction(actionId) {
-  return actionId === "add-contact" || actionId === "add-job";
+  return (
+    actionId === "add-contact" ||
+    actionId === "add-job" ||
+    actionId === "submit-resume-contact"
+  );
 }
 
 function getEmailAddinRecordType(actionId) {
@@ -2151,7 +2155,7 @@ function normalizePayType(value) {
 function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
   const data = parserResult?.structured_data || {};
 
-  if (actionId === "add-contact") {
+  if (actionId === "add-contact" || actionId === "submit-resume-contact") {
     const nameParts = splitFullName(data.full_name);
 
     return {
