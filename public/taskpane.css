@@ -1,21 +1,21 @@
 :root {
   color-scheme: light;
-  --page: #f7f3ff;
-  --surface: rgba(255, 255, 255, 0.98);
-  --surface-strong: #ffffff;
-  --surface-soft: #fcfaff;
-  --line: rgba(109, 65, 198, 0.12);
-  --line-strong: rgba(109, 65, 198, 0.2);
-  --text: #181d27;
-  --muted: #5f6b7a;
-  --accent: #8d59ff;
-  --accent-deep: #6941c6;
-  --accent-soft: #f4efff;
+  --page: #120824;
+  --surface: rgba(23, 12, 43, 0.92);
+  --surface-strong: #1a0f32;
+  --surface-soft: rgba(34, 19, 64, 0.9);
+  --line: rgba(181, 151, 255, 0.18);
+  --line-strong: rgba(181, 151, 255, 0.28);
+  --text: #f5f2ff;
+  --muted: #c2b8dd;
+  --accent: #9a61ff;
+  --accent-deep: #6f3fe2;
+  --accent-soft: rgba(154, 97, 255, 0.16);
   --success: #0f8a54;
   --success-soft: #e7f7ef;
   --danger: #c94242;
   --danger-soft: #fde8e8;
-  --shadow: 0 16px 40px rgba(51, 36, 97, 0.1);
+  --shadow: 0 20px 44px rgba(7, 3, 17, 0.34);
   --ui-font-family: "Sofia Pro", "Avenir Next", "Segoe UI", sans-serif;
   --ui-copy-size: 13px;
   --ui-heading-size: 16px;
@@ -39,8 +39,9 @@ body {
   font-size: var(--ui-copy-size);
   color: var(--text);
   background:
-    radial-gradient(circle at top right, rgba(141, 89, 255, 0.16), transparent 30%),
-    linear-gradient(180deg, #fdfcff 0%, var(--page) 100%);
+    radial-gradient(circle at top center, rgba(140, 86, 255, 0.42), transparent 28%),
+    radial-gradient(circle at 20% 18%, rgba(110, 53, 230, 0.24), transparent 26%),
+    linear-gradient(180deg, #090312 0%, var(--page) 48%, #120724 100%);
 }
 
 button,
@@ -65,26 +66,26 @@ input {
   border: 0;
   border-radius: 0;
   background:
-    linear-gradient(180deg, rgba(248, 243, 255, 0.8) 0%, rgba(255, 255, 255, 0.98) 34%);
+    linear-gradient(180deg, rgba(12, 5, 24, 0.96) 0%, rgba(22, 10, 40, 0.98) 34%);
   overflow: hidden;
 }
 
 .hero-strip {
   padding: 12px 12px 0;
   background:
-    linear-gradient(180deg, rgba(243, 237, 255, 0.9) 0%, rgba(250, 247, 255, 0.55) 100%);
+    linear-gradient(180deg, rgba(18, 8, 36, 0.98) 0%, rgba(25, 11, 49, 0.88) 100%);
   color: var(--text);
 }
 
 .hero-card {
-  border: 1px solid rgba(141, 89, 255, 0.14);
+  border: 1px solid rgba(170, 138, 255, 0.24);
   border-radius: 18px;
   background:
-    radial-gradient(circle at top right, rgba(141, 89, 255, 0.14), transparent 34%),
-    linear-gradient(132deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 241, 255, 0.92) 62%, rgba(239, 246, 255, 0.88) 100%);
+    radial-gradient(circle at 78% 12%, rgba(152, 92, 255, 0.4), transparent 30%),
+    linear-gradient(132deg, rgba(33, 18, 63, 0.98) 0%, rgba(24, 13, 48, 0.94) 54%, rgba(18, 11, 38, 0.98) 100%);
   box-shadow:
-    0 10px 28px rgba(57, 38, 110, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    0 20px 42px rgba(6, 2, 14, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .hero-top,
@@ -123,11 +124,11 @@ input {
   width: 48px;
   height: 48px;
   padding: 6px;
-  background: #ffffff;
-  border: 1px solid rgba(105, 65, 198, 0.1);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow:
-    0 8px 20px rgba(67, 41, 133, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    0 10px 22px rgba(4, 2, 12, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
 .brand-mark-image {
@@ -161,7 +162,7 @@ input {
 .hero-strip h1 {
   margin: 0;
   font-size: 17px;
-  color: #31204f;
+  color: #ffffff;
 }
 
 .actions-frame h2,
@@ -178,7 +179,7 @@ input {
 }
 
 .hero-copy {
-  color: #5b6270;
+  color: #d7cef1;
   margin-top: 2px;
   max-width: 410px;
 }
@@ -187,16 +188,16 @@ input {
   justify-content: space-between;
   gap: 10px;
   margin-top: 0;
-  border-top: 1px solid rgba(105, 65, 198, 0.08);
+  border-top: 1px solid rgba(176, 145, 255, 0.14);
   padding: 10px 16px 12px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), rgba(141, 89, 255, 0.05));
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.02), rgba(154, 97, 255, 0.12));
 }
 
 .welcome-copy {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #31204f;
+  color: #ffffff;
 }
 
 .welcome-tag {
@@ -205,8 +206,8 @@ input {
   min-height: 22px;
   border-radius: 999px;
   padding: 0 10px;
-  background: linear-gradient(180deg, rgba(144, 91, 255, 0.14), rgba(144, 91, 255, 0.08));
-  color: var(--accent-deep);
+  background: linear-gradient(180deg, rgba(174, 136, 255, 0.24), rgba(123, 73, 235, 0.24));
+  color: #f7f2ff;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -220,6 +221,7 @@ input {
   flex-direction: column;
   min-height: 0;
   padding: 0 12px 12px;
+  background: linear-gradient(180deg, #f7f3ff 0%, #fbf9ff 100%);
 }
 
 .actions-surface {
@@ -229,7 +231,7 @@ input {
   flex-direction: column;
   border: 1px solid rgba(141, 89, 255, 0.1);
   border-radius: 18px 18px 24px 24px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 12px 32px rgba(55, 37, 108, 0.05);
   padding: 10px 10px 12px;
 }
@@ -363,7 +365,7 @@ input {
     var(--button-tint);
   border: 1px solid rgba(105, 65, 198, 0.08);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
     0 5px 12px rgba(48, 33, 90, 0.05);
 }
 
@@ -440,10 +442,10 @@ input {
 }
 
 .ghost-button {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.98);
   color: var(--accent-deep);
-  border: 1px solid rgba(105, 65, 198, 0.12);
-  box-shadow: 0 6px 14px rgba(67, 41, 133, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 10px 22px rgba(6, 2, 14, 0.18);
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -465,7 +467,7 @@ input {
 .icon-button {
   width: 32px;
   height: 32px;
-  background: #f6f1ff;
+  background: rgba(244, 237, 255, 0.96);
   color: var(--accent-deep);
   font-weight: 700;
 }
@@ -528,6 +530,40 @@ input {
   line-height: 1.45;
 }
 
+.session-notice {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 14px;
+  border: 1px solid rgba(154, 97, 255, 0.18);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(154, 97, 255, 0.12);
+}
+
+.session-notice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--accent-deep);
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(7, 3, 17, 0.16);
+}
+
+.session-notice .login-copy {
+  margin: 0;
+}
+
+.session-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
@@ -552,15 +588,50 @@ input {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0 14px;
-  background: white;
-  color: var(--text);
+  background: #ffffff;
+  color: #1d1533;
+  caret-color: var(--accent-deep);
   font-size: var(--ui-copy-size);
   font-family: var(--ui-font-family);
+}
+
+.field input::placeholder {
+  color: #6f6685;
+  opacity: 1;
+}
+
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:hover,
+.field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1d1533;
+  box-shadow: 0 0 0 1000px #ffffff inset;
 }
 
 .field input:focus {
   outline: 2px solid rgba(144, 91, 255, 0.18);
   border-color: var(--accent);
+}
+
+.login-dialog .field input,
+.login-dialog .field input[type="email"],
+.login-dialog .field input[type="password"] {
+  background-color: #ffffff !important;
+  color: #140b26 !important;
+  -webkit-text-fill-color: #140b26 !important;
+  caret-color: #6f3fe2 !important;
+}
+
+.login-dialog .field input::placeholder {
+  color: #3b3156 !important;
+  -webkit-text-fill-color: #3b3156 !important;
+  opacity: 1 !important;
+}
+
+.login-dialog .field input:-webkit-autofill,
+.login-dialog .field input:-webkit-autofill:hover,
+.login-dialog .field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #140b26 !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
 }
 
 .remember-row {
@@ -592,12 +663,15 @@ input {
 }
 
 .attach-email-dialog {
+  display: flex;
+  flex-direction: column;
   width: min(100%, 1080px);
   max-height: min(92vh, 960px);
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid rgba(105, 65, 198, 0.14);
   border-radius: 28px;
-  padding: 28px;
+  padding: 20px;
   background: #ffffff;
   box-shadow: 0 28px 80px rgba(25, 17, 48, 0.26);
 }
@@ -651,8 +725,8 @@ input {
 }
 
 .attach-email-header h2 {
-  margin: 8px 0 0;
-  font-size: 18px;
+  margin: 4px 0 0;
+  font-size: 16px;
   line-height: 1.1;
   color: #28324a;
 }
@@ -663,12 +737,13 @@ input {
 
 .attach-email-summary {
   display: grid;
-  gap: 14px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 10px;
   border: 1px solid #dbe6d5;
-  border-radius: 18px;
-  padding: 16px 18px;
+  border-radius: 14px;
+  padding: 10px 12px;
   background: #f8fff4;
+  flex-shrink: 0;
 }
 
 .attach-email-summary-active {
@@ -683,16 +758,17 @@ input {
 }
 
 .attach-email-summary-copy strong {
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .attach-email-summary-copy span {
   color: #4c7b5d;
+  font-size: 11.5px;
 }
 
 .attach-email-summary-list {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .attach-email-summary-item {
@@ -701,42 +777,44 @@ input {
 }
 
 .attach-email-summary-item strong {
-  min-width: 110px;
+  min-width: 96px;
   color: #355f44;
+  font-size: 11.5px;
 }
 
 .attach-email-chip-list {
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .attach-email-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
+  min-height: 22px;
   border: 1px solid #d1dfcf;
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 0 9px;
   background: #ffffff;
   color: #335344;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
 .attach-email-tabs {
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 12px;
   border-bottom: 1px solid #e5e7eb;
-  padding-bottom: 10px;
+  padding-bottom: 6px;
+  flex-shrink: 0;
 }
 
 .attach-email-tab {
   border: 0;
   border-bottom: 2px solid transparent;
-  padding: 0 4px 10px;
+  padding: 0 4px 7px;
   background: transparent;
   color: #667085;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -747,17 +825,19 @@ input {
 }
 
 .attach-email-toolbar {
-  margin-top: 16px;
+  margin-top: 10px;
+  flex-shrink: 0;
 }
 
 .attach-email-search {
   width: 100%;
-  min-height: 44px;
+  min-height: 34px;
   border: 1px solid #d0d7e3;
-  border-radius: 14px;
-  padding: 0 14px;
+  border-radius: 10px;
+  padding: 0 10px;
   background: #ffffff;
   color: var(--text);
+  font-size: 12px;
 }
 
 .attach-email-search:focus {
@@ -765,27 +845,58 @@ input {
   border-color: var(--accent);
 }
 
-.attach-email-table {
-  margin-top: 16px;
+.attach-email-table-shell {
+  flex: 1 1 260px;
+  min-height: 150px;
+  max-height: calc(92vh - 340px);
+  margin-top: 10px;
+  overflow: auto;
   border: 1px solid #d8deeb;
-  border-radius: 18px;
-  overflow: hidden;
+  border-radius: 14px;
   background: #ffffff;
+  scrollbar-width: thin;
+  scrollbar-color: #a5acb8 #f3f4f6;
+}
+
+.attach-email-table-shell::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.attach-email-table-shell::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 999px;
+}
+
+.attach-email-table-shell::-webkit-scrollbar-thumb {
+  background: #a5acb8;
+  border-radius: 999px;
+}
+
+.attach-email-table {
+  --attach-email-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(180px, 0.9fr);
+  --attach-email-table-min-width: 640px;
+  overflow: visible;
+  background: #ffffff;
+  min-width: var(--attach-email-table-min-width);
 }
 
 .attach-email-table-head,
 .attach-email-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: var(--attach-email-columns);
   gap: 16px;
 }
 
 .attach-email-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   border-bottom: 1px solid #e4e7ec;
-  padding: 14px 16px;
+  padding: 8px 10px;
   background: #f8fafc;
   color: #475467;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -797,9 +908,12 @@ input {
 .attach-email-row {
   border: 0;
   border-bottom: 1px solid #eef2f6;
-  padding: 14px 16px;
+  min-height: 32px;
+  padding: 7px 10px;
   background: #ffffff;
   color: #101828;
+  font-size: 11.5px;
+  line-height: 1.25;
   text-align: left;
   cursor: pointer;
 }
@@ -828,42 +942,54 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 220px;
-  margin-top: 16px;
+  flex: 1 1 180px;
+  min-height: 150px;
+  margin-top: 10px;
   border: 1px dashed #d0d7e3;
-  border-radius: 18px;
+  border-radius: 14px;
   color: #667085;
   background: #fbfcff;
+  font-size: 12px;
 }
 
 .attach-email-footer {
-  margin-top: 20px;
+  flex-shrink: 0;
+  margin-top: 12px;
+  border-top: 1px solid #e4e7ec;
+  padding-top: 10px;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
+  background: #ffffff;
 }
 
 .attach-email-pager {
-  gap: 10px;
+  gap: 8px;
 }
 
 .attach-email-pager-copy {
   color: #475467;
   font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .attach-email-pager-button {
-  min-width: 88px;
+  min-width: 72px;
+  min-height: 34px;
+  border-radius: 10px;
+  font-size: 12px;
 }
 
 .attach-email-footer-actions {
-  gap: 14px;
+  gap: 10px;
 }
 
 .attach-email-footer-button,
 .attach-email-footer-primary {
-  min-width: 140px;
-  min-height: 52px;
-  border-radius: 16px;
+  min-width: 112px;
+  min-height: 36px;
+  border-radius: 10px;
+  font-size: 12px;
 }
 
 .import-badge {
@@ -1056,6 +1182,7 @@ input {
   .attach-email-dialog {
     padding: 18px;
     border-radius: 20px;
+    max-height: calc(100vh - 24px);
   }
 
   .import-header,
@@ -1087,11 +1214,6 @@ input {
     flex-wrap: wrap;
   }
 
-  .attach-email-table-head,
-  .attach-email-row {
-    grid-template-columns: 1fr;
-  }
-
   .resume-checkbox {
     justify-content: flex-start;
     min-width: 0;
@@ -1113,5 +1235,29 @@ input {
   .attach-email-pager-button {
     width: 100%;
     min-width: 0;
+  }
+
+  .attach-email-table-shell {
+    min-height: 140px;
+    max-height: calc(100vh - 330px);
+  }
+
+  .attach-email-pager {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .attach-email-pager-copy {
+    flex: 1;
+    text-align: center;
+    font-size: 11.5px;
+  }
+
+  .attach-email-pager-button {
+    width: auto;
+    min-width: 64px;
+    padding: 0 8px;
   }
 }

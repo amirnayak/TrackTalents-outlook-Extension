@@ -7,10 +7,17 @@ const ACTIONS = [
     intent: "create-candidate"
   },
   {
+    id: "source-resume-job",
+    label: "Source Resume To Job",
+    iconSrc: "/assets/action-icons/source-resume-job.png",
+    path: "/candidates",
+    intent: "source-resume-job"
+  },
+  {
     id: "submit-resume-contact",
     label: "Submit Resume To Contact",
     iconSrc: "/assets/action-icons/submit-resume-contact.png",
-    path: "/contacts",
+    path: "/candidates",
     intent: "submit-resume-contact"
   },
   {
@@ -34,13 +41,6 @@ const ACTIONS = [
     path: "/contacts",
     intent: "create-contact"
   },
-  {
-    id: "source-resume-job",
-    label: "Source Resume To Job",
-    iconSrc: "/assets/action-icons/source-resume-job.png",
-    path: "/local-search",
-    intent: "source-resume-job"
-  },
   // {
   //   id: "reply-all",
   //   label: "Reply All",
@@ -51,7 +51,7 @@ const ACTIONS = [
 ];
 
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
-const ATTACH_EMAIL_PAGE_SIZE = 10;
+const ATTACH_EMAIL_PAGE_SIZE = 25;
 
 const state = {
   officeReady: false,
@@ -71,6 +71,7 @@ const state = {
   loginSubmitting: false,
   pendingActionId: null,
   showLoginModal: false,
+  sessionNoticeOpen: false,
   attachEmail: buildAttachEmailState(),
   importModal: buildImportModalState(),
   loginForm: {
@@ -170,11 +171,18 @@ function buildPreviewItem() {
 
   return {
     itemId: "preview-mail-001",
+    messageId: "preview-mail-001",
     subject: "Senior Java Developer Resume - Ananya Sharma",
     from: {
       displayName: "Ananya Sharma",
       email: "ananya.sharma@example.com"
     },
+    replyTo: [
+      {
+        displayName: "Ananya Sharma",
+        email: "ananya.sharma@example.com"
+      }
+    ],
     to: [
       {
         displayName: "TrackTalents Hiring",
@@ -205,11 +213,7 @@ function isAddCandidateAction(actionId) {
 }
 
 function isResumeImportAction(actionId) {
-  return (
-    actionId === "add-candidate" ||
-    actionId === "submit-resume-contact" ||
-    actionId === "source-resume-job"
-  );
+  return actionId === "add-candidate";
 }
 
 function isAttachEmailAction(actionId) {
@@ -217,7 +221,11 @@ function isAttachEmailAction(actionId) {
 }
 
 function isEmailParserAction(actionId) {
-  return actionId === "add-contact" || actionId === "add-job";
+  return (
+    actionId === "add-contact" ||
+    actionId === "add-job" ||
+    actionId === "submit-resume-contact"
+  );
 }
 
 function getEmailAddinRecordType(actionId) {
@@ -306,13 +314,32 @@ function persistAuth(auth) {
   }
 }
 
+function isTokenExpired(auth = state.auth) {
+  const tokenExpiration = Number(auth?.tokenExpiration || 0);
+
+  return Boolean(tokenExpiration && tokenExpiration <= Date.now());
+}
+
+function openSessionExpiredNotice(actionId = "") {
+  state.pendingActionId = actionId || state.pendingActionId || null;
+  state.sessionNoticeOpen = true;
+  state.showLoginModal = false;
+  state.loginError = "";
+  state.loginSubmitting = false;
+  state.launchMessage = "";
+  closeAttachEmailPanel();
+  closeImportModal();
+  render();
+}
+
 function isAuthenticated() {
   return Boolean(
     state.auth?.email &&
       state.auth?.accessToken &&
       state.auth?.loginData &&
       (state.auth?.userId || state.auth?.loginData?.userId || state.auth?.loginData?.UserId) &&
-      (state.auth?.mId || state.auth?.loginData?.MId)
+      (state.auth?.mId || state.auth?.loginData?.MId) &&
+      !isTokenExpired(state.auth)
   );
 }
 
@@ -386,10 +413,48 @@ function normalizeRecipientList(recipients) {
     .filter((recipient) => recipient.displayName || recipient.email);
 }
 
+function getPrimaryRecipient(recipients) {
+  return normalizeRecipientList(recipients)[0] || { displayName: "", email: "" };
+}
+
 function getImportableAttachments() {
   return Array.isArray(state.currentItem?.attachments)
     ? state.currentItem.attachments.filter((attachment) => !attachment.isInline)
     : [];
+}
+
+function getCurrentOfficeAttachmentsSnapshot() {
+  const item = window.Office?.context?.mailbox?.item;
+  const attachments = Array.isArray(item?.attachments)
+    ? item.attachments.map(normalizeOfficeAttachment)
+    : [];
+
+  if (attachments.length > 0 && state.currentItem) {
+    const attachmentNames = attachments.map((attachment) => attachment.name).filter(Boolean);
+    const resumeNames = attachmentNames.filter(isResumeFile);
+    state.currentItem.attachments = attachments;
+    state.currentItem.attachmentCount = attachments.length;
+    state.currentItem.attachmentNames = attachmentNames;
+    state.currentItem.hasResumeAttachment = resumeNames.length > 0;
+    state.currentItem.primaryResumeName = resumeNames[0] || "";
+  }
+
+  return attachments;
+}
+
+function getCurrentEmailAttachmentsForStorage() {
+  const liveAttachments = getCurrentOfficeAttachmentsSnapshot();
+  const currentAttachments = getImportableAttachments();
+  const attachmentsByKey = new Map();
+
+  [...currentAttachments, ...liveAttachments]
+    .filter((attachment) => attachment && !attachment.isInline)
+    .forEach((attachment, index) => {
+      const key = String(attachment.id || attachment.name || `attachment-${index}`);
+      attachmentsByKey.set(key, attachment);
+    });
+
+  return Array.from(attachmentsByKey.values());
 }
 
 function getSelectedImportResume() {
@@ -440,17 +505,27 @@ function getAttachEmailSelectedTotal() {
 }
 
 function getAttachEmailPageCount(type) {
-  const total =
-    type === "candidates"
-      ? Number(state.attachEmail.candidatesTotal || 0)
-      : Number(state.attachEmail.contactsTotal || 0);
+  const total = getAttachEmailTotal(type);
   return Math.max(1, Math.ceil(total / ATTACH_EMAIL_PAGE_SIZE));
+}
+
+function getAttachEmailTotal(type) {
+  return type === "candidates"
+    ? Number(state.attachEmail.candidatesTotal || 0)
+    : Number(state.attachEmail.contactsTotal || 0);
 }
 
 function getAttachEmailCurrentPage(type) {
   return type === "candidates"
     ? Number(state.attachEmail.candidatesPage || 0)
     : Number(state.attachEmail.contactsPage || 0);
+}
+
+function getAttachEmailPagerLabel(type) {
+  const currentPage = getAttachEmailCurrentPage(type);
+  const pageCount = getAttachEmailPageCount(type);
+
+  return `Page ${currentPage + 1} of ${pageCount}`;
 }
 
 function getAttachEmailRows(type) {
@@ -820,6 +895,11 @@ function renderAttachEmailSummaryRows() {
 function renderAttachEmailTable() {
   const activeTab = state.attachEmail.activeTab;
   const rows = getAttachEmailRows(activeTab);
+  const columnTemplate =
+    activeTab === "candidates"
+      ? "minmax(180px, 1.15fr) minmax(220px, 1fr) minmax(160px, 0.85fr)"
+      : "minmax(180px, 1.05fr) minmax(220px, 1fr) minmax(180px, 0.9fr)";
+  const tableMinWidth = activeTab === "candidates" ? "620px" : "640px";
 
   if (!rows.length) {
     return `
@@ -835,60 +915,70 @@ function renderAttachEmailTable() {
 
   if (activeTab === "candidates") {
     return `
-      <div class="attach-email-table">
-        <div class="attach-email-table-head">
-          <span>Name</span>
-          <span>Email</span>
-          <span>Location</span>
-        </div>
-        <div class="attach-email-table-body">
-          ${rows
-            .map((candidate) => {
-              const selected = isAttachEmailSelected("candidates", candidate.id);
-              return `
-                <button
-                  type="button"
-                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
-                  data-attach-email-row-type="candidates"
-                  data-attach-email-row-id="${escapeAttribute(candidate.id)}"
-                >
-                  <span>${escapeHtml(candidate.name)}</span>
-                  <span>${escapeHtml(candidate.email || "—")}</span>
-                  <span>${escapeHtml(candidate.location || "—")}</span>
-                </button>
-              `;
-            })
-            .join("")}
+      <div class="attach-email-table-shell">
+        <div
+          class="attach-email-table"
+          style="--attach-email-columns: ${escapeAttribute(columnTemplate)}; --attach-email-table-min-width: ${escapeAttribute(tableMinWidth)};"
+        >
+          <div class="attach-email-table-head">
+            <span>Name</span>
+            <span>Email</span>
+            <span>Location</span>
+          </div>
+          <div class="attach-email-table-body">
+            ${rows
+              .map((candidate) => {
+                const selected = isAttachEmailSelected("candidates", candidate.id);
+                return `
+                  <button
+                    type="button"
+                    class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                    data-attach-email-row-type="candidates"
+                    data-attach-email-row-id="${escapeAttribute(candidate.id)}"
+                  >
+                    <span>${escapeHtml(candidate.name)}</span>
+                    <span>${escapeHtml(candidate.email || "—")}</span>
+                    <span>${escapeHtml(candidate.location || "—")}</span>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
         </div>
       </div>
     `;
   }
 
   return `
-    <div class="attach-email-table">
-      <div class="attach-email-table-head">
-        <span>Name</span>
-        <span>Email</span>
-        <span>Company</span>
-      </div>
-      <div class="attach-email-table-body">
-        ${rows
-          .map((contact) => {
-            const selected = isAttachEmailSelected("contacts", contact.id);
-            return `
-              <button
-                type="button"
-                class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
-                data-attach-email-row-type="contacts"
-                data-attach-email-row-id="${escapeAttribute(contact.id)}"
-              >
-                <span>${escapeHtml(contact.name)}</span>
-                <span>${escapeHtml(contact.email || "—")}</span>
-                <span>${escapeHtml(contact.company || "—")}</span>
-              </button>
-            `;
-          })
-          .join("")}
+    <div class="attach-email-table-shell">
+      <div
+        class="attach-email-table"
+        style="--attach-email-columns: ${escapeAttribute(columnTemplate)}; --attach-email-table-min-width: ${escapeAttribute(tableMinWidth)};"
+      >
+        <div class="attach-email-table-head">
+          <span>Name</span>
+          <span>Email</span>
+          <span>Company</span>
+        </div>
+        <div class="attach-email-table-body">
+          ${rows
+            .map((contact) => {
+              const selected = isAttachEmailSelected("contacts", contact.id);
+              return `
+                <button
+                  type="button"
+                  class="attach-email-row ${selected ? "attach-email-row-selected" : ""}"
+                  data-attach-email-row-type="contacts"
+                  data-attach-email-row-id="${escapeAttribute(contact.id)}"
+                >
+                  <span>${escapeHtml(contact.name)}</span>
+                  <span>${escapeHtml(contact.email || "—")}</span>
+                  <span>${escapeHtml(contact.company || "—")}</span>
+                </button>
+              `;
+            })
+            .join("")}
+        </div>
       </div>
     </div>
   `;
@@ -898,10 +988,10 @@ function renderAttachEmailPanel() {
   const activeTab = state.attachEmail.activeTab;
   const currentPage = getAttachEmailCurrentPage(activeTab);
   const pageCount = getAttachEmailPageCount(activeTab);
+  const pagerLabel = getAttachEmailPagerLabel(activeTab);
   const hasSelection = getAttachEmailSelectedTotal() > 0;
   const submitLabel = state.attachEmail.submitting ? "Linking..." : "Link Email";
-  const searchPlaceholder =
-    activeTab === "candidates" ? "Search candidates..." : "Search contacts...";
+  const searchPlaceholder = "Search any column...";
 
   return `
     <div class="modal-overlay" role="presentation">
@@ -968,7 +1058,7 @@ function renderAttachEmailPanel() {
               Prev
             </button>
             <span class="attach-email-pager-copy">
-              ${escapeHtml(`${currentPage + 1} / ${pageCount}`)}
+              ${escapeHtml(pagerLabel)}
             </span>
             <button
               type="button"
@@ -1087,6 +1177,35 @@ function renderLoginModal() {
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderSessionExpiredModal() {
+  return `
+    <div class="modal-overlay" role="presentation">
+      <section class="login-dialog session-dialog" role="dialog" aria-modal="true" aria-labelledby="session-expired-title">
+        <div class="login-header">
+          <div>
+            <p class="section-label">Session Expired</p>
+            <h2 id="session-expired-title">Please log in again</h2>
+          </div>
+          <button id="close-session-notice-button" class="icon-button" type="button" aria-label="Close session expired notice">X</button>
+        </div>
+
+        <div class="session-notice">
+          <div class="session-notice-icon" aria-hidden="true">i</div>
+          <p class="login-copy">
+            Your TrackTalents Outlook token has expired. Please log in again to continue using Add Candidate, Add Job, Link Emails, Submit Resume, or Source Resume.
+          </p>
+        </div>
+
+        <div class="login-actions session-actions">
+          <button id="session-login-button" class="primary-button" type="button">
+            Log in again
+          </button>
+        </div>
       </section>
     </div>
   `;
@@ -1280,6 +1399,7 @@ function render() {
     </main>
 
     ${state.showLoginModal ? renderLoginModal() : ""}
+    ${state.sessionNoticeOpen ? renderSessionExpiredModal() : ""}
     ${state.attachEmail.open ? renderAttachEmailPanel() : ""}
     ${state.importModal.open ? renderImportModal() : ""}
   `;
@@ -1322,6 +1442,7 @@ function bindEvents() {
       state.auth = null;
       state.pendingActionId = null;
       state.showLoginModal = false;
+      state.sessionNoticeOpen = false;
       state.loginError = "";
       state.loginSubmitting = false;
       state.loginForm.password = "";
@@ -1337,6 +1458,25 @@ function bindEvents() {
   if (closeLoginButton) {
     closeLoginButton.addEventListener("click", () => {
       state.showLoginModal = false;
+      state.loginError = "";
+      render();
+    });
+  }
+
+  const closeSessionNoticeButton = document.getElementById("close-session-notice-button");
+  if (closeSessionNoticeButton) {
+    closeSessionNoticeButton.addEventListener("click", () => {
+      state.sessionNoticeOpen = false;
+      state.pendingActionId = null;
+      render();
+    });
+  }
+
+  const sessionLoginButton = document.getElementById("session-login-button");
+  if (sessionLoginButton) {
+    sessionLoginButton.addEventListener("click", () => {
+      state.sessionNoticeOpen = false;
+      state.showLoginModal = true;
       state.loginError = "";
       render();
     });
@@ -1535,6 +1675,11 @@ function bindEvents() {
         return;
       }
 
+      if (isTokenExpired(state.auth)) {
+        openSessionExpiredNotice(actionId);
+        return;
+      }
+
       if (!isAuthenticated()) {
         state.pendingActionId = actionId;
         state.showLoginModal = true;
@@ -1553,6 +1698,20 @@ async function handleAttachEmailSubmit() {
   const contactCount = state.attachEmail.selectedContacts.length;
   const candidateCount = state.attachEmail.selectedCandidates.length;
 
+  if (isTokenExpired(state.auth)) {
+    openSessionExpiredNotice("attach-email");
+    return;
+  }
+
+  if (!state.auth?.accessToken) {
+    state.pendingActionId = "attach-email";
+    state.showLoginModal = true;
+    state.loginError = "";
+    closeAttachEmailPanel();
+    render();
+    return;
+  }
+
   if (!contactCount && !candidateCount) {
     state.attachEmail.error = "Select at least one contact or candidate before attaching this email.";
     render();
@@ -1564,10 +1723,27 @@ async function handleAttachEmailSubmit() {
   render();
 
   try {
-    const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
+    const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
+    logEmailAddinRecordDebug("Resolved linked email body", {
+      bodyLength: emailBody.length,
+      bodyContainsHtml: isProbablyHtmlBody(emailBody),
+      step: "attach-email"
+    });
+    const emailAttachments = getCurrentEmailAttachmentsForStorage();
+    logEmailAddinRecordDebug("Resolved linked email attachments", {
+      count: emailAttachments.length,
+      names: emailAttachments.map((attachment) => attachment?.name || "").filter(Boolean),
+      step: "attach-email"
+    });
+    const importedDocuments = await prepareEmailAddinDocuments(emailAttachments);
+    logEmailAddinRecordDebug("Linked email documents prepared", {
+      count: importedDocuments.length,
+      names: importedDocuments.map((document) => document?.DocumentName || "").filter(Boolean),
+      contentLengths: importedDocuments.map((document) => String(document?.Content || "").length),
+      step: "attach-email"
+    });
     const emailAddinRecord = await createEmailAddinRecord("email", {
-      body: state.currentItem?.bodyPreview || "",
-      bodyHtml: state.currentItem?.bodyHtml || "",
+      body: emailBody,
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -1666,6 +1842,7 @@ async function handleLoginSubmit(event) {
     state.loginSubmitting = false;
     state.loginError = "";
     state.showLoginModal = false;
+    state.sessionNoticeOpen = false;
     state.loginForm.password = "";
     state.launchMessage = "";
 
@@ -1695,6 +1872,8 @@ function buildLaunchContext(action) {
     subject: item.subject || "",
     fromName: item.from?.displayName || "",
     fromEmail: item.from?.email || "",
+    replyToName: getPrimaryRecipient(item.replyTo).displayName,
+    replyToEmail: getPrimaryRecipient(item.replyTo).email,
     attachmentCount: String(item.attachmentCount || 0),
     hasResume: item.hasResumeAttachment ? "true" : "false",
     resumeFile: item.primaryResumeName || "",
@@ -1825,6 +2004,82 @@ function buildEmailParserRequest(actionId) {
   };
 }
 
+function readOfficeItemBody(coercionType, timeoutMs = 5000) {
+  const item = window.Office?.context?.mailbox?.item;
+  if (!item?.body?.getAsync || !coercionType) {
+    return Promise.resolve("");
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve("");
+      }
+    }, timeoutMs);
+
+    item.body.getAsync(coercionType, (result) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      window.clearTimeout(timeout);
+
+      if (result.status === Office.AsyncResultStatus.Succeeded) {
+        resolve(String(result.value || "").trim());
+        return;
+      }
+
+      resolve("");
+    });
+  });
+}
+
+async function getCurrentEmailBodyForStorage(options = {}) {
+  const requireHtml = Boolean(options.requireHtml);
+  const currentHtml = toPlainString(state.currentItem?.bodyHtml).trim();
+  if (currentHtml && (!requireHtml || isProbablyHtmlBody(currentHtml))) {
+    return currentHtml;
+  }
+
+  const officeHtml = await readOfficeItemBody(window.Office?.CoercionType?.Html);
+  if (officeHtml && (!requireHtml || isProbablyHtmlBody(officeHtml))) {
+    if (state.currentItem) {
+      state.currentItem.bodyHtml = officeHtml;
+    }
+    return officeHtml;
+  }
+
+  if (requireHtml) {
+    throw new Error(
+      "Unable to read the Outlook HTML body. Reload the add-in, select the email again, and link it once more."
+    );
+  }
+
+  const currentText = toPlainString(state.currentItem?.bodyPreview).trim();
+  if (currentText) {
+    return currentText;
+  }
+
+  const officeText = await readOfficeItemBody(window.Office?.CoercionType?.Text);
+  if (officeText) {
+    const normalizedText = officeText
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .trim();
+
+    if (state.currentItem) {
+      state.currentItem.bodyPreview = normalizedText;
+    }
+
+    return normalizedText;
+  }
+
+  return "";
+}
+
 async function parseCurrentEmailForAction(actionId) {
   const response = await fetch("/api/email/parse", {
     method: "POST",
@@ -1862,6 +2117,10 @@ function toPlainString(value) {
   return "";
 }
 
+function isProbablyHtmlBody(value) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(value || ""));
+}
+
 function firstNonEmpty(...values) {
   return values.find((value) => {
     if (Array.isArray(value)) {
@@ -1896,7 +2155,7 @@ function normalizePayType(value) {
 function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
   const data = parserResult?.structured_data || {};
 
-  if (actionId === "add-contact") {
+  if (actionId === "add-contact" || actionId === "submit-resume-contact") {
     const nameParts = splitFullName(data.full_name);
 
     return {
@@ -1978,10 +2237,6 @@ function buildEmailParserImportOptions(actionId, parserResult, parserWarning = "
 
   if (actionId === "add-job" && data.job_title) {
     options.subject = data.job_title;
-  }
-
-  if (actionId === "add-job" && (data.job_description_raw || data.job_summary)) {
-    options.bodyPreview = data.job_description_raw || data.job_summary;
   }
 
   return options;
@@ -2076,23 +2331,32 @@ function logEmailAddinRecordDebug(stage, details) {
 
 function buildEmailAddinRecordRequest(type, options = {}) {
   const item = state.currentItem || {};
+  const body = String(options.body ?? item.bodyHtml ?? item.bodyPreview ?? "");
+  const contextId = String(options.contextId ?? formatContextId(item));
+  const messageId = String(options.messageId ?? item.messageId ?? item.itemId ?? "");
+  const replyTo = getPrimaryRecipient(options.replyToRecipients ?? item.replyTo);
 
   return {
     type,
     resumes: Array.isArray(options.resumes) ? options.resumes : null,
     documents: buildDocumentPayload(options.documents),
     emailData: {
-      Body: String(options.body ?? item.bodyPreview ?? ""),
-      BodyHtml: String(options.bodyHtml ?? item.bodyHtml ?? ""),
+      Body: body,
       Subject: String(options.subject ?? item.subject ?? ""),
       From: {
         Name: String(options.fromName ?? item.from?.displayName ?? ""),
         Email: String(options.fromEmail ?? item.from?.email ?? "")
       },
+      ReplyTo: {
+        Name: replyTo.displayName,
+        Email: replyTo.email
+      },
       To: normalizeRecipientList(options.toRecipients ?? item.to).map((recipient) => ({
         Name: recipient.displayName,
         Email: recipient.email
-      }))
+      })),
+      ContextId: contextId,
+      MessageId: messageId
     }
   };
 }
@@ -2119,31 +2383,6 @@ async function createEmailAddinRecord(type, options = {}) {
 
   if (!response.ok) {
     throw new Error(payload?.message || "Unable to create the email add-in record.");
-  }
-
-  return payload;
-}
-
-async function getEmailAddinRecord(recordId) {
-  logEmailAddinRecordDebug("GET request", { recordId });
-
-  const response = await fetch(`/api/EmailAddinRecord/${encodeURIComponent(recordId)}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${state.auth?.accessToken || ""}`
-    }
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  logEmailAddinRecordDebug("GET response", {
-    ok: response.ok,
-    status: response.status,
-    recordId,
-    payload
-  });
-
-  if (!response.ok) {
-    throw new Error(payload?.message || "Unable to load the email add-in record.");
   }
 
   return payload;
@@ -2194,24 +2433,79 @@ function buildTargetPath(actionId) {
 }
 
 function buildOutlookActionImportPayload(actionId, options = {}) {
+  const item = state.currentItem || {};
+  const replyTo = getPrimaryRecipient(options.replyToRecipients ?? item.replyTo);
+
   return {
     actionId,
     source: "outlook-addin",
     importedAt: new Date().toISOString(),
+    contextId: String(options.contextId ?? formatContextId(item)),
+    messageId: String(options.messageId ?? item.messageId ?? item.itemId ?? ""),
     selectedResumeName: options.selectedResume?.FileName || "",
     emailContext: {
-      subject: options.subject || state.currentItem?.subject || "",
-      fromName: options.fromName || state.currentItem?.from?.displayName || "",
-      fromEmail: options.fromEmail || state.currentItem?.from?.email || "",
-      bodyPreview: options.bodyPreview || state.currentItem?.bodyPreview || ""
+      contextId: String(options.contextId ?? formatContextId(item)),
+      messageId: String(options.messageId ?? item.messageId ?? item.itemId ?? ""),
+      subject: options.subject || item.subject || "",
+      fromName: options.fromName || item.from?.displayName || "",
+      fromEmail: options.fromEmail || item.from?.email || "",
+      replyToName: options.replyToName || replyTo.displayName || "",
+      replyToEmail: options.replyToEmail || replyTo.email || "",
+      bodyHtml:
+        options.body ||
+        options.bodyHtml ||
+        item.bodyHtml ||
+        "",
+      bodyPreview:
+        options.bodyPreview ||
+        item.bodyPreview ||
+        options.body ||
+        item.bodyHtml ||
+        ""
     },
     parsedResumeData: options.parsedResumeData || null,
     resumes: Array.isArray(options.resumes) ? options.resumes : [],
     documents: Array.isArray(options.documents) ? options.documents : [],
+    attachments: Array.isArray(options.attachments) ? options.attachments : [],
     emailAddinRecord: options.emailAddinRecord || null,
     selectedResume: options.selectedResume || null,
     emailParserResult: options.emailParserResult || null,
     warnings: Array.isArray(options.warnings) ? options.warnings : []
+  };
+}
+
+function buildEmailAttachmentBridgePayload(attachment) {
+  if (!attachment || typeof attachment !== "object") {
+    return null;
+  }
+
+  const attachmentName = String(attachment.name || attachment.DocumentName || "").trim();
+  const attachmentBinary = String(attachment.content || attachment.Content || "").trim();
+
+  if (!attachmentName || !attachmentBinary) {
+    return null;
+  }
+
+  return {
+    AttachmentName: attachmentName,
+    AttachmentBinary: attachmentBinary,
+    ContentType: String(
+      attachment.contentType || attachment.ContentType || "application/octet-stream"
+    ),
+    Size: Number(attachment.size || attachment.Size || 0)
+  };
+}
+
+function buildInlineOutlookImportFallback(outlookImport) {
+  if (!outlookImport || typeof outlookImport !== "object") {
+    return null;
+  }
+
+  return {
+    ...outlookImport,
+    // Raw attachment binaries can make the bridge URL too large. The session keeps the full payload.
+    attachments: [],
+    selectedResume: outlookImport.selectedResume || null
   };
 }
 
@@ -2242,23 +2536,6 @@ function buildAuthBridgeUrl(actionId, bridgeData = {}) {
   });
 
   return `${buildAbsoluteAppUrl(state.config.authBridgePath)}#${hash.toString()}`;
-}
-
-function createPendingImportLaunch(actionId) {
-  const sessionId =
-    typeof window.crypto?.randomUUID === "function"
-      ? window.crypto.randomUUID()
-      : `outlook-import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  launchAction(actionId, {
-    outlookImportSessionId: sessionId,
-    outlookImportApiHost: window.location.origin
-  });
-
-  return {
-    sessionId,
-    apiHost: window.location.origin
-  };
 }
 
 function safeOpenWindow(url) {
@@ -2293,44 +2570,62 @@ function launchAction(actionId, options = {}) {
 }
 
 async function handleDirectActionLaunch(actionId) {
+  if (isTokenExpired(state.auth)) {
+    openSessionExpiredNotice(actionId);
+    return;
+  }
+
   if (!state.auth?.accessToken) {
-    state.loginError = "Your TrackTalents session expired. Please sign in again.";
+    state.pendingActionId = actionId;
+    state.showLoginModal = true;
+    state.loginError = "";
     render();
     return;
   }
 
-  const pendingLaunch = createPendingImportLaunch(actionId);
-
   try {
-    let emailParserImportOptions = {};
+    state.launchMessage = "";
+    render();
 
-    if (isEmailParserAction(actionId)) {
-      state.launchMessage = "";
-      render();
+    const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
+    const emailParserTask = isEmailParserAction(actionId)
+      ? parseCurrentEmailForAction(actionId)
+          .then((parserResult) => {
+            logEmailAddinRecordDebug("Email parsed", {
+              actionId,
+              status: parserResult?.status || "",
+              confidence: parserResult?.confidence_summary || "",
+              missingRequiredFields: parserResult?.missing_required_fields || [],
+              step: "parse-email"
+            });
 
-      try {
-        const parserResult = await parseCurrentEmailForAction(actionId);
-        emailParserImportOptions = buildEmailParserImportOptions(actionId, parserResult);
-        logEmailAddinRecordDebug("Email parsed", {
-          actionId,
-          status: parserResult?.status || "",
-          confidence: parserResult?.confidence_summary || "",
-          missingRequiredFields: parserResult?.missing_required_fields || [],
-          step: "parse-email"
-        });
-      } catch (error) {
-        const parserWarning =
-          error instanceof Error ? error.message : "Unable to parse the current Outlook email.";
-        emailParserImportOptions = buildEmailParserImportOptions(actionId, null, parserWarning);
-        logEmailAddinRecordDebug("Email parse warning", {
-          actionId,
-          message: parserWarning,
-          step: "parse-email"
-        });
-      }
-    }
+            return buildEmailParserImportOptions(actionId, parserResult);
+          })
+          .catch((error) => {
+            const parserWarning =
+              error instanceof Error ? error.message : "Unable to parse the current Outlook email.";
+            logEmailAddinRecordDebug("Email parse warning", {
+              actionId,
+              message: parserWarning,
+              step: "parse-email"
+            });
 
-    const importedDocuments = await prepareEmailAddinDocuments(getImportableAttachments());
+            return buildEmailParserImportOptions(actionId, null, parserWarning);
+          })
+      : Promise.resolve({});
+    const emailAttachments = getCurrentEmailAttachmentsForStorage();
+    logEmailAddinRecordDebug("Resolved action email attachments", {
+      actionId,
+      count: emailAttachments.length,
+      names: emailAttachments.map((attachment) => attachment?.name || "").filter(Boolean),
+      step: "create-email-addin-record"
+    });
+    const importedDocumentsTask = prepareEmailAddinDocuments(emailAttachments);
+    const [emailParserImportOptions, importedDocuments] = await Promise.all([
+      emailParserTask,
+      importedDocumentsTask
+    ]);
+
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -2346,8 +2641,7 @@ async function handleDirectActionLaunch(actionId) {
     });
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
-      body: state.currentItem?.bodyPreview || "",
-      bodyHtml: state.currentItem?.bodyHtml || "",
+      body: emailBody,
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -2363,20 +2657,16 @@ async function handleDirectActionLaunch(actionId) {
     });
 
     const recordId = String(payload?._id || "");
-    const emailAddinRecord = recordId ? await getEmailAddinRecord(recordId) : payload;
     const outlookActionImport = buildOutlookActionImportPayload(actionId, {
       ...emailParserImportOptions,
       emailAddinRecord: {
-        ...emailAddinRecord,
-        _id: recordId || emailAddinRecord?._id || "",
-        Type: String(emailAddinRecord?.Type || getEmailAddinRecordType(actionId))
+        ...payload,
+        _id: recordId || payload?._id || "",
+        Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       }
     });
 
-    const importSession = await updateOutlookImportSession(
-      pendingLaunch.sessionId,
-      outlookActionImport
-    );
+    const importSession = await createOutlookImportSession(outlookActionImport);
 
     logEmailAddinRecordDebug("Outlook import session created", {
       actionId,
@@ -2384,10 +2674,11 @@ async function handleDirectActionLaunch(actionId) {
       step: "launch-action"
     });
 
-    state.launchMessage = "";
-    state.showLoginModal = false;
-    closeImportModal();
-    render();
+    launchAction(actionId, {
+      outlookCandidateImport: buildInlineOutlookImportFallback(outlookActionImport),
+      outlookImportSessionId: importSession.sessionId,
+      outlookImportApiHost: importSession.apiHost
+    });
   } catch (error) {
     logEmailAddinRecordDebug("Submit error", {
       actionId,
@@ -2488,8 +2779,16 @@ async function handleImportSubmit() {
   }
 
   if (!state.auth?.accessToken) {
-    state.importModal.error = "Your TrackTalents session expired. Please sign in again.";
+    state.pendingActionId = actionId;
+    state.showLoginModal = true;
+    state.loginError = "";
+    closeImportModal();
     render();
+    return;
+  }
+
+  if (isTokenExpired(state.auth)) {
+    openSessionExpiredNotice(actionId);
     return;
   }
 
@@ -2497,9 +2796,8 @@ async function handleImportSubmit() {
   state.importModal.error = "";
   render();
 
-  const pendingLaunch = createPendingImportLaunch(actionId);
-
   try {
+    const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -2508,7 +2806,11 @@ async function handleImportSubmit() {
       step: "resolve-attachment"
     });
 
-    const resolvedSelectedResume = await resolveAttachmentForImport(selectedResume);
+    const selectedResumeTask = resolveAttachmentForImport(selectedResume);
+    const resolvedDocumentAttachmentsTask = Promise.all(
+      documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
+    );
+    const resolvedSelectedResume = await selectedResumeTask;
     logEmailAddinRecordDebug("Attachment resolved", {
       fileName: resolvedSelectedResume?.name || "",
       contentType: resolvedSelectedResume?.contentType || "",
@@ -2516,7 +2818,10 @@ async function handleImportSubmit() {
       step: "parse-resume"
     });
 
-    const parsedResumeData = await parseResumeAttachment(resolvedSelectedResume);
+    const [parsedResumeData, resolvedDocumentAttachments] = await Promise.all([
+      parseResumeAttachment(resolvedSelectedResume),
+      resolvedDocumentAttachmentsTask
+    ]);
     logEmailAddinRecordDebug("Resume parsed", {
       fileName: resolvedSelectedResume?.name || "",
       hasParsedData: Boolean(parsedResumeData),
@@ -2524,9 +2829,7 @@ async function handleImportSubmit() {
       parsedLastName: String(parsedResumeData?.LastName || ""),
       step: "create-email-addin-record"
     });
-    const resolvedDocumentAttachments = await Promise.all(
-      documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
-    );
+
     const importedDocuments = await prepareImportDocuments(resolvedDocumentAttachments);
     logEmailAddinRecordDebug("Documents prepared", {
       count: importedDocuments.length,
@@ -2535,8 +2838,7 @@ async function handleImportSubmit() {
     });
 
     const payload = await createEmailAddinRecord(getEmailAddinRecordType(actionId), {
-      body: state.currentItem?.bodyPreview || "",
-      bodyHtml: state.currentItem?.bodyHtml || "",
+      body: emailBody,
       subject: state.currentItem?.subject || "",
       fromName: state.currentItem?.from?.displayName || "",
       fromEmail: state.currentItem?.from?.email || "",
@@ -2550,36 +2852,38 @@ async function handleImportSubmit() {
     });
 
     const recordId = String(payload?._id || "");
-    const emailAddinRecord = recordId ? await getEmailAddinRecord(recordId) : payload;
     logEmailAddinRecordDebug("Email add-in record loaded", {
       recordId,
       step: "create-outlook-import-session"
     });
     const resumePreview = buildResumeBridgePreview(resolvedSelectedResume);
+    const emailAttachments = [
+      buildEmailAttachmentBridgePayload(resolvedSelectedResume),
+      ...resolvedDocumentAttachments.map(buildEmailAttachmentBridgePayload)
+    ].filter(Boolean);
     const outlookCandidateImport = buildOutlookActionImportPayload(actionId, {
       parsedResumeData: parsedResumeData || null,
       resumes: Array.isArray(parsedResumeData?.Resumes) ? parsedResumeData.Resumes : [],
       documents: importedDocuments,
+      attachments: emailAttachments,
       emailAddinRecord: {
-        ...emailAddinRecord,
-        _id: recordId || emailAddinRecord?._id || "",
-        Type: String(emailAddinRecord?.Type || getEmailAddinRecordType(actionId))
+        ...payload,
+        _id: recordId || payload?._id || "",
+        Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       },
       selectedResume: resumePreview
     });
-    const importSession = await updateOutlookImportSession(
-      pendingLaunch.sessionId,
-      outlookCandidateImport
-    );
+    const importSession = await createOutlookImportSession(outlookCandidateImport);
     logEmailAddinRecordDebug("Outlook import session created", {
       sessionId: importSession.sessionId,
       step: "launch-action"
     });
 
-    state.launchMessage = "";
-    state.showLoginModal = false;
-    closeImportModal();
-    render();
+    launchAction(actionId, {
+      outlookCandidateImport: buildInlineOutlookImportFallback(outlookCandidateImport),
+      outlookImportSessionId: importSession.sessionId,
+      outlookImportApiHost: importSession.apiHost
+    });
   } catch (error) {
     logEmailAddinRecordDebug("Submit error", {
       message: error instanceof Error ? error.message : String(error)
@@ -2630,9 +2934,11 @@ function setItemStateFromOffice(item) {
     ? `${item.from.displayName || "Unknown"} <${item.from.emailAddress}>`
     : "Unavailable in this mode";
   const toRecipients = normalizeRecipientList(item.to);
+  const replyToRecipients = normalizeRecipientList(item.replyTo);
 
   state.currentItem = {
     itemId: toPlainString(item.itemId) || toPlainString(item.internetMessageId),
+    messageId: toPlainString(item.internetMessageId) || toPlainString(item.itemId),
     subject: toPlainString(item.subject),
     from: item.from
       ? {
@@ -2640,6 +2946,7 @@ function setItemStateFromOffice(item) {
           email: toPlainString(item.from.emailAddress)
         }
       : { displayName: "", email: "" },
+    replyTo: replyToRecipients,
     to: toRecipients,
     fromDisplay,
     toCount: toRecipients.length,
