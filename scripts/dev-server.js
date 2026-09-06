@@ -1949,7 +1949,13 @@ async function start() {
     console.log(`TrackTalents Outlook app running at https://${HOST}:${HTTPS_PORT}`);
     console.log(`Health check: https://${HOST}:${HTTPS_PORT}/health`);
     console.log(`Preview in app browser: http://${HOST}:${HTTP_PREVIEW_PORT}/taskpane.html`);
-    console.log("Sideload manifest: manifest/tracktalents-outlook-manifest.xml");
+    console.log(
+      `Sideload manifest: manifest/${
+        IS_PRODUCTION_HOSTING
+          ? "tracktalents-outlook-production.xml"
+          : "tracktalents-outlook-development.xml"
+      }`
+    );
   });
 
   httpServer.listen(HTTP_PREVIEW_PORT, HOST, () => {
