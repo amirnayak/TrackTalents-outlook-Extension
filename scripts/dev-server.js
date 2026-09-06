@@ -46,7 +46,10 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
 
 app.get("/manifest.xml", (req, res) => {
-  const manifestPath = path.join(__dirname, "..", "manifest", "tracktalents-outlook-manifest.xml");
+  const manifestFile = IS_PRODUCTION_HOSTING
+    ? "tracktalents-outlook-production.xml"
+    : "tracktalents-outlook-development.xml";
+  const manifestPath = path.join(__dirname, "..", "manifest", manifestFile);
   const manifestXml = fs.readFileSync(manifestPath, "utf8");
   const publicUrl = getAddinPublicUrl(req);
 
