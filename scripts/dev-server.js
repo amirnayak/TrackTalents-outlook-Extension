@@ -12,7 +12,7 @@ const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
 const IS_PRODUCTION_HOSTING =
   process.env.NODE_ENV === "production" ||
   Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
-const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "localhost");
+const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "127.0.0.1");
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
 const APP_HOST =
   process.env.APP_HOST || (IS_PRODUCTION_HOSTING ? "https://newtest.tracktalents.com" : "http://localhost:3000");
