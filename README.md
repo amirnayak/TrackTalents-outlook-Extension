@@ -77,9 +77,14 @@ The deployed add-in exposes a manifest at:
 https://tracktalents-outlook-extension-production.up.railway.app/manifest.xml
 ```
 
-The manifest is generated from `manifest/tracktalents-outlook-manifest.xml` and rewrites local URLs to the public Railway host. If the Railway domain changes, set `ADDIN_PUBLIC_URL` to the new public base URL.
+The deployed `/manifest.xml` endpoint serves `manifest/tracktalents-outlook-production.xml`. If the Railway domain changes, set `ADDIN_PUBLIC_URL` to the new public base URL.
 
-Set `APP_HOST` in Railway to the public TrackTalents ATS web app URL when the add-in should open live ATS pages instead of local development pages.
+Runtime defaults are environment-specific, so a Railway production deployment uses the production ATS API and app:
+
+- development: `https://testapi.tracktalents.com/api/` and `http://localhost:3000`
+- production: `https://api.tracktalents.com/api/` and `https://www.tracktalents.com`
+
+Set `API_HOST` and `APP_HOST` in Railway only when a different production environment is intentionally required. Do not set either variable to a test endpoint in the production Railway service.
 
 ## Outlook manifests
 
