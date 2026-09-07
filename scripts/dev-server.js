@@ -13,9 +13,14 @@ const IS_PRODUCTION_HOSTING =
   process.env.NODE_ENV === "production" ||
   Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
 const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "::");
-const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
+const DEVELOPMENT_API_HOST = "https://testapi.tracktalents.com/api/";
+const PRODUCTION_API_HOST = "https://api.tracktalents.com/api/";
+const DEVELOPMENT_APP_HOST = "http://localhost:3000";
+const PRODUCTION_APP_HOST = "https://www.tracktalents.com";
+const API_HOST =
+  process.env.API_HOST || (IS_PRODUCTION_HOSTING ? PRODUCTION_API_HOST : DEVELOPMENT_API_HOST);
 const APP_HOST =
-  process.env.APP_HOST || (IS_PRODUCTION_HOSTING ? "https://newtest.tracktalents.com" : "http://localhost:3000");
+  process.env.APP_HOST || (IS_PRODUCTION_HOSTING ? PRODUCTION_APP_HOST : DEVELOPMENT_APP_HOST);
 const EMAIL_PARSER_API_URL =
   process.env.EMAIL_PARSER_API_URL || "https://tracktalents-ai-production.up.railway.app";
 const ADDIN_PUBLIC_URL = process.env.ADDIN_PUBLIC_URL || "";
