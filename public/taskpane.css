@@ -337,6 +337,30 @@ input {
     inset 0 1px 2px rgba(65, 42, 128, 0.08);
 }
 
+.action-button:disabled {
+  cursor: wait;
+  opacity: 0.78;
+}
+
+.action-button-loading {
+  border-color: rgba(105, 65, 198, 0.34);
+  background: linear-gradient(90deg, #ffffff 0%, #f5efff 100%);
+}
+
+.action-button-loading .action-icon {
+  animation: action-icon-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes action-icon-pulse {
+  from {
+    transform: scale(1);
+  }
+
+  to {
+    transform: scale(1.08);
+  }
+}
+
 .action-button:nth-child(2n) {
   --button-tint: rgba(88, 134, 255, 0.1);
   --button-glow: rgba(88, 134, 255, 0.14);
@@ -1108,6 +1132,46 @@ input {
   color: #6d28d9;
   font-size: var(--ui-copy-size);
   font-weight: 700;
+}
+
+.action-processing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid #d8c4ff;
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: #432778;
+  background: #fbf8ff;
+}
+
+.action-processing strong,
+.action-processing span {
+  display: block;
+}
+
+.action-processing span {
+  margin-top: 2px;
+  color: #685985;
+  font-size: 13px;
+}
+
+.action-processing-spinner {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0 !important;
+  border: 3px solid rgba(105, 65, 198, 0.2);
+  border-top-color: #6941c6;
+  border-radius: 50%;
+  animation: action-processing-spin 700ms linear infinite;
+}
+
+@keyframes action-processing-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .import-footer {

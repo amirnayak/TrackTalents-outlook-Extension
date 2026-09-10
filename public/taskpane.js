@@ -72,6 +72,10 @@ const state = {
   pendingActionId: null,
   showLoginModal: false,
   sessionNoticeOpen: false,
+  actionLaunch: {
+    active: false,
+    actionId: null
+  },
   attachEmail: buildAttachEmailState(),
   importModal: buildImportModalState(),
   loginForm: {
@@ -213,7 +217,7 @@ function isAddCandidateAction(actionId) {
 }
 
 function isResumeImportAction(actionId) {
-  return actionId === "add-candidate";
+  return actionId === "add-candidate" || actionId === "source-resume-job";
 }
 
 function isAttachEmailAction(actionId) {
@@ -1256,7 +1260,13 @@ function renderImportModal() {
   const importDisabled = !hasAttachments || !selectedResume || state.importModal.submitting;
   const actionId = state.importModal.actionId;
   const actionLabel = actionLabelFromId(actionId);
-  const submitLabel = state.importModal.submitting ? "Importing..." : "Import";
+  const submitLabel = state.importModal.submitting
+    ? actionId === "source-resume-job"
+      ? "Preparing job selection..."
+      : "Preparing import..."
+    : actionId === "source-resume-job"
+      ? "Continue to Job Selection"
+      : "Import";
   const additionalDocumentsLabel = `${summary.documentCount} additional document${
     summary.documentCount === 1 ? "" : "s"
   }`;
@@ -1321,6 +1331,22 @@ function renderImportModal() {
         ${
           state.importModal.error
             ? `<div class="banner banner-error">${escapeHtml(state.importModal.error)}</div>`
+            : ""
+        }
+
+        ${
+          state.importModal.submitting
+            ? `<div class="action-processing" role="status" aria-live="polite">
+                <span class="action-processing-spinner" aria-hidden="true"></span>
+                <div>
+                  <strong>${
+                    actionId === "source-resume-job"
+                      ? "Preparing the resume for job assignment"
+                      : "Preparing your TrackTalents action"
+                  }</strong>
+                  <span>Please wait. This can take a few seconds.</span>
+                </div>
+              </div>`
             : ""
         }
 
@@ -1408,19 +1434,24 @@ function render() {
 }
 
 function renderActionButton(action) {
+  const isLaunching = state.actionLaunch.active && state.actionLaunch.actionId === action.id;
+  const actionsDisabled = state.actionLaunch.active;
+
   return `
     <button
-      class="action-button"
+      class="action-button ${isLaunching ? "action-button-loading" : ""}"
       type="button"
       data-action-id="${escapeAttribute(action.id)}"
       style="--action-watermark: url('${escapeAttribute(action.iconSrc)}');"
       aria-label="${escapeAttribute(action.label)}"
+      aria-busy="${isLaunching ? "true" : "false"}"
+      ${actionsDisabled ? "disabled" : ""}
     >
       <span class="action-icon" aria-hidden="true">
         <img src="${escapeAttribute(action.iconSrc)}" alt="" class="action-icon-image" />
       </span>
       <span class="action-copy">
-        <strong>${escapeHtml(action.label)}</strong>
+        <strong>${escapeHtml(isLaunching ? "Opening..." : action.label)}</strong>
       </span>
     </button>
   `;
@@ -2581,12 +2612,20 @@ function launchAction(actionId, options = {}) {
     });
     safeOpenWindow(url);
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: false,
+      actionId: null
+    };
     state.showLoginModal = false;
     closeAttachEmailPanel();
     closeImportModal();
     render();
   } catch (error) {
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: false,
+      actionId: null
+    };
     state.loginError = error instanceof Error ? error.message : "Unable to open TrackTalents.";
     render();
   }
@@ -2608,6 +2647,10 @@ async function handleDirectActionLaunch(actionId) {
 
   try {
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: true,
+      actionId
+    };
     render();
 
     const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
@@ -2708,6 +2751,10 @@ async function handleDirectActionLaunch(actionId) {
       message: error instanceof Error ? error.message : String(error)
     });
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: false,
+      actionId: null
+    };
     state.loginError =
       error instanceof Error ? error.message : "Unable to open the TrackTalents action.";
     render();
