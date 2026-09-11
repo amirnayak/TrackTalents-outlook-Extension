@@ -1929,12 +1929,21 @@ function buildPreviewCandidateImportPayload(selectedResume, attachments, emailCo
 }
 
 async function start() {
-  if (IS_PRODUCTION_HOSTING) {
+  // Railway terminates HTTPS at its public proxy. Local Outlook sideloading,
+  // however, still needs the Office development certificate on this machine.
+  if (IS_RAILWAY_HOSTING) {
     const httpServer = http.createServer(app);
 
     httpServer.listen(HTTPS_PORT, HOST, () => {
       console.log(`TrackTalents Outlook app running at http://${HOST}:${HTTPS_PORT}`);
       console.log(`Health check: http://${HOST}:${HTTPS_PORT}/health`);
+      console.log(
+        `Sideload manifest: manifest/${
+          IS_PRODUCTION_HOSTING
+            ? "tracktalents-outlook-production.xml"
+            : "tracktalents-outlook-development.xml"
+        }`
+      );
     });
     return;
   }
