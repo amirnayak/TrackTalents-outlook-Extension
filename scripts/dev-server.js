@@ -9,10 +9,13 @@ const devCerts = require("office-addin-dev-certs");
 
 const HTTPS_PORT = Number(process.env.PORT || 3201);
 const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
-const IS_PRODUCTION_HOSTING =
-  process.env.NODE_ENV === "production" ||
-  Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
-const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "::");
+const IS_RAILWAY_HOSTING = Boolean(
+  process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN
+);
+const IS_PRODUCTION_HOSTING = process.env.RAILWAY_ENVIRONMENT === "production";
+const IS_DEVELOPMENT_HOSTING =
+  IS_RAILWAY_HOSTING && !IS_PRODUCTION_HOSTING;
+const HOST = process.env.HOST || (IS_RAILWAY_HOSTING ? "0.0.0.0" : "::");
 const API_HOST = process.env.API_HOST || "https://testapi.tracktalents.com/api/";
 const APP_HOST =
   process.env.APP_HOST || (IS_PRODUCTION_HOSTING ? "https://newtest.tracktalents.com" : "http://localhost:3000");
@@ -48,7 +51,9 @@ app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
 app.get("/manifest.xml", (req, res) => {
   const manifestFile = IS_PRODUCTION_HOSTING
     ? "tracktalents-outlook-production.xml"
-    : "tracktalents-outlook-development.xml";
+    : IS_DEVELOPMENT_HOSTING
+      ? "tracktalents-outlook-development.xml"
+      : "tracktalents-outlook-localhost.xml";
   const manifestPath = path.join(__dirname, "..", "manifest", manifestFile);
   const manifestXml = fs.readFileSync(manifestPath, "utf8");
   const publicUrl = getAddinPublicUrl(req);
@@ -63,6 +68,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     host: HOST,
     productionHosting: IS_PRODUCTION_HOSTING,
+    developmentHosting: IS_DEVELOPMENT_HOSTING,
     httpsPort: HTTPS_PORT,
     httpPreviewPort: HTTP_PREVIEW_PORT,
     apiHost: API_HOST,
@@ -1953,7 +1959,9 @@ async function start() {
       `Sideload manifest: manifest/${
         IS_PRODUCTION_HOSTING
           ? "tracktalents-outlook-production.xml"
-          : "tracktalents-outlook-development.xml"
+          : IS_DEVELOPMENT_HOSTING
+            ? "tracktalents-outlook-development.xml"
+            : "tracktalents-outlook-localhost.xml"
       }`
     );
   });
