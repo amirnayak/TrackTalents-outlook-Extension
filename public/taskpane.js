@@ -2152,11 +2152,25 @@ function normalizePayType(value) {
   return "";
 }
 
+function phoneWithExtension(phoneNumber, extension) {
+  const phone = toPlainString(phoneNumber);
+  const extensionDigits = toPlainString(extension).replace(/\D/g, "");
+
+  if (!phone || !extensionDigits || /(?:\bext\.?|\bx)\s*\d+\s*$/i.test(phone)) {
+    return phone;
+  }
+
+  return `${phone} x${extensionDigits}`;
+}
+
 function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
   const data = parserResult?.structured_data || {};
 
   if (actionId === "add-contact" || actionId === "submit-resume-contact") {
     const nameParts = splitFullName(data.full_name);
+    const cellNumber = firstNonEmpty(data.cell_number, data.mobile_number, data.phone_number, data.phone, "");
+    const workNumber = firstNonEmpty(data.work_number, data.work_phone, data.office_phone, "");
+    const directNumber = firstNonEmpty(data.direct_number, data.direct_phone, "");
 
     return {
       FirstName: data.first_name || nameParts.firstName,
@@ -2166,9 +2180,18 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
       Notes: data.notes || "",
       Contact: {
         Email1: data.email || "",
-        CellNumber: data.cell_number || "",
-        WorkNumber: data.work_number || "",
-        DirectNumber: "",
+        CellNumber: phoneWithExtension(
+          cellNumber,
+          firstNonEmpty(data.cell_extension, data.mobile_extension, data.phone_extension, data.extension, "")
+        ),
+        WorkNumber: phoneWithExtension(
+          workNumber,
+          firstNonEmpty(data.work_extension, data.office_extension, "")
+        ),
+        DirectNumber: phoneWithExtension(
+          directNumber,
+          firstNonEmpty(data.direct_extension, "")
+        ),
         StreetAddress: data.street_address || "",
         City: data.city || "",
         State: data.state || "",
