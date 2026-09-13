@@ -240,6 +240,24 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
 
     const data = await readApiResponse(response);
     if (!response.ok) {
+      // The production API currently does not expose EmailAddinRecord. The
+      // Outlook handoff itself is still complete without it because the import
+      // session carries the email context and uploaded documents. Treat only
+      // that known missing-controller response as an optional feature, while
+      // preserving all other API failures for the user to correct.
+      if (isEmailAddinRecordControllerUnavailable(response.status, data)) {
+        const localOnlyRecord = normalizeEmailAddinRecord({
+          ...localRecordPayload,
+          EmailAddinRecordUnavailable: true
+        });
+        recordEmailAddinDebugEvent("EmailAddinRecord unavailable; continuing import", {
+          type,
+          status: response.status
+        });
+        res.json(localOnlyRecord);
+        return;
+      }
+
       res.status(response.status).json({
         message: data?.message || "Unable to create the email add-in record.",
         details: data
@@ -1149,6 +1167,26 @@ function recordEmailAddinDebugEvent(stage, details) {
     emailAddinRecordDebugEvents.shift();
   }
   console.log("[EmailAddinRecordDebug]", JSON.stringify(event));
+}
+
+function isEmailAddinRecordControllerUnavailable(status, data) {
+  if (status !== 404) {
+    return false;
+  }
+
+  const details = [
+    data?.Message,
+    data?.message,
+    data?.MessageDetail,
+    data?.messageDetail,
+    data?.error
+  ]
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  return details.includes("emailaddinrecord") &&
+    (details.includes("controller") || details.includes("resource"));
 }
 
 function buildEmailAddinRecordPayload(emailData, type, resumes, documents) {
