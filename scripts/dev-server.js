@@ -72,6 +72,10 @@ app.get("/manifest.xml", (req, res) => {
     manifestXml
   );
 
+  // Outlook can cache a custom add-in manifest for a long time. Always serve
+  // the current environment URL and prevent an old Railway domain from being
+  // reused after a development deployment or domain migration.
+  res.set("Cache-Control", "no-store, max-age=0");
   res.type("application/xml").send(publicManifestXml);
 });
 
