@@ -62,8 +62,17 @@ app.get("/manifest.xml", (req, res) => {
   const manifestPath = path.join(__dirname, "..", "manifest", manifestFile);
   const manifestXml = fs.readFileSync(manifestPath, "utf8");
   const publicUrl = getAddinPublicUrl(req);
+  const manifestHosts = [
+    "https://localhost:3201",
+    "https://tracktalents-outlook-extension-development.up.railway.app",
+    "https://tracktalents-outlook-extension-production.up.railway.app",
+  ];
+  const publicManifestXml = manifestHosts.reduce(
+    (xml, host) => xml.replaceAll(host, publicUrl),
+    manifestXml
+  );
 
-  res.type("application/xml").send(manifestXml.replaceAll("https://localhost:3201", publicUrl));
+  res.type("application/xml").send(publicManifestXml);
 });
 
 app.use(express.static(path.join(__dirname, "..", "public")));
