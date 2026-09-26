@@ -5,14 +5,14 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>3ffa42d0-00b3-4dda-abb6-a11a6b3e925a</Id>
-  <Version>1.0.8.0</Version>
+  <Version>1.0.9.0</Version>
   <ProviderName>TrackTalents</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="TrackTalents Outlook" />
   <Description DefaultValue="TrackTalents Outlook add-in for email-driven recruiting workflows." />
   <IconUrl DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/assets/icon-64.png" />
   <HighResolutionIconUrl DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/assets/icon-80.png" />
-  <SupportUrl DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production" />
+  <SupportUrl DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260926" />
   <AppDomains>
     <AppDomain>https://tracktalents-outlook-extension-production.up.railway.app</AppDomain>
   </AppDomains>
@@ -27,13 +27,13 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production" />
+        <SourceLocation DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260926" />
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
     <Form xsi:type="ItemEdit">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production" />
+        <SourceLocation DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260926" />
       </DesktopSettings>
     </Form>
   </FormSettings>
@@ -109,8 +109,8 @@
         <bt:Image id="Icon.80" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production" />
-        <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production" />
+        <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260926" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260926" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="TrackTalents" />
