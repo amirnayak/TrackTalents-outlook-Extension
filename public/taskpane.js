@@ -193,6 +193,8 @@ function buildPreviewItem() {
         email: "hiring@tracktalents.com"
       }
     ],
+    cc: [],
+    sentAt: "",
     fromDisplay: "Ananya Sharma <ananya.sharma@example.com>",
     toCount: 1,
     attachments,
@@ -2199,15 +2201,24 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
 
   if (actionId === "add-contact" || actionId === "submit-resume-contact") {
     const nameParts = splitFullName(data.full_name);
-    const cellNumber = firstNonEmpty(data.cell_number, data.mobile_number, data.phone_number, data.phone, "");
-    const workNumber = firstNonEmpty(data.work_number, data.work_phone, data.office_phone, "");
-    const directNumber = firstNonEmpty(data.direct_number, data.direct_phone, "");
+    // Providers can label the same contact details differently. Preserve the
+    // canonical fields while accepting those equivalent values from a parser.
+    const cellNumber = firstNonEmpty(
+      data.cell_number, data.mobile_number, data.mobile, data.phone_number, data.phone, ""
+    );
+    const workNumber = firstNonEmpty(
+      data.work_number, data.work_phone, data.office_phone, data.office_number, ""
+    );
+    const directNumber = firstNonEmpty(data.direct_number, data.direct_phone, data.phone_direct, "");
+    const companyName = firstNonEmpty(
+      data.company_name, data.company, data.companyName, data.employer, data.organization, ""
+    );
 
     return {
       FirstName: data.first_name || nameParts.firstName,
       LastName: data.last_name || nameParts.lastName,
       JobTitle: data.job_title || "",
-      CompanyName: data.company_name || "",
+      CompanyName: companyName,
       Notes: data.notes || "",
       Contact: {
         Email1: data.email || "",
@@ -2409,6 +2420,11 @@ function buildEmailAddinRecordRequest(type, options = {}) {
         Name: recipient.displayName,
         Email: recipient.email
       })),
+      Cc: normalizeRecipientList(options.ccRecipients ?? item.cc).map((recipient) => ({
+        Name: recipient.displayName,
+        Email: recipient.email
+      })),
+      SentAt: String(options.sentAt ?? item.sentAt ?? ""),
       ContextId: contextId,
       MessageId: messageId
     }
@@ -3005,6 +3021,7 @@ function setItemStateFromOffice(item) {
     : "Unavailable in this mode";
   const toRecipients = normalizeRecipientList(item.to);
   const replyToRecipients = normalizeRecipientList(item.replyTo);
+  const ccRecipients = normalizeRecipientList(item.cc);
 
   state.currentItem = {
     itemId: toPlainString(item.itemId) || toPlainString(item.internetMessageId),
@@ -3018,6 +3035,8 @@ function setItemStateFromOffice(item) {
       : { displayName: "", email: "" },
     replyTo: replyToRecipients,
     to: toRecipients,
+    cc: ccRecipients,
+    sentAt: toPlainString(item.dateTimeCreated || item.dateTimeModified),
     fromDisplay,
     toCount: toRecipients.length,
     attachments,
