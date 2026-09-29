@@ -1154,7 +1154,13 @@ function sanitizeEmailAddinData(emailData) {
         : "",
     From: sanitizeSingleRecipient(emailData?.From ?? emailData?.from),
     ReplyTo: sanitizeSingleRecipient(emailData?.ReplyTo ?? emailData?.replyTo),
-    To: sanitizeRecipientList(emailData?.To ?? emailData?.to)
+    To: sanitizeRecipientList(emailData?.To ?? emailData?.to),
+    Cc: sanitizeRecipientList(emailData?.Cc ?? emailData?.cc),
+    SentAt: typeof emailData?.SentAt === "string"
+      ? emailData.SentAt
+      : typeof emailData?.sentAt === "string"
+        ? emailData.sentAt
+        : ""
   };
 }
 
@@ -1374,7 +1380,12 @@ function mergeEmailAddinEmailData(emailData, cachedEmailData) {
     To:
       Array.isArray(nextEmailData?.To) && nextEmailData.To.length > 0
         ? nextEmailData.To
-        : previousEmailData?.To
+        : previousEmailData?.To,
+    Cc:
+      Array.isArray(nextEmailData?.Cc) && nextEmailData.Cc.length > 0
+        ? nextEmailData.Cc
+        : previousEmailData?.Cc,
+    SentAt: pickFirstString(nextEmailData?.SentAt, previousEmailData?.SentAt)
   };
 }
 
