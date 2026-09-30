@@ -1193,13 +1193,17 @@ function isEmailAddinRecordControllerUnavailable(status, data) {
     return false;
   }
 
-  const details = [
-    data?.Message,
-    data?.message,
-    data?.MessageDetail,
-    data?.messageDetail,
-    data?.error
-  ]
+  // ASP.NET returns this error both as a direct object and, through some
+  // proxies, nested inside a `details` object. Check both response shapes so
+  // the optional record endpoint cannot block an Outlook import.
+  const details = [data, data?.details, data?.Details]
+    .flatMap((value) => [
+      value?.Message,
+      value?.message,
+      value?.MessageDetail,
+      value?.messageDetail,
+      value?.error
+    ])
     .filter((value) => typeof value === "string")
     .join(" ")
     .toLowerCase();
