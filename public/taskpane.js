@@ -2196,6 +2196,37 @@ function phoneWithExtension(phoneNumber, extension) {
   return `${phone} x${extensionDigits}`;
 }
 
+function extractLocationParts(data = {}) {
+  const location = data.location || data.current_location || data.currentLocation || "";
+  if (location && typeof location === "object") {
+    return {
+      streetAddress: firstNonEmpty(location.street_address, location.streetAddress, location.StreetAddress, data.street_address, ""),
+      city: firstNonEmpty(location.city, location.City, data.city, ""),
+      state: firstNonEmpty(location.state, location.State, location.region, data.state, ""),
+      postalCode: firstNonEmpty(location.postal_code, location.postalCode, location.PostalCode, data.postal_code, ""),
+      country: firstNonEmpty(location.country, location.Country, data.country, "")
+    };
+  }
+
+  const text = toPlainString(location);
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+  return {
+    streetAddress: toPlainString(data.street_address),
+    city: firstNonEmpty(data.city, parts[0], ""),
+    state: firstNonEmpty(data.state, parts.length > 1 ? parts[1] : "", ""),
+    postalCode: toPlainString(data.postal_code),
+    country: toPlainString(data.country)
+  };
+}
+
+function formatLocation(data = {}) {
+  const explicitLocation = toPlainString(data.location || data.current_location || data.currentLocation);
+  if (explicitLocation) return explicitLocation;
+
+  const location = extractLocationParts(data);
+  return [location.city, location.state, location.country].filter(Boolean).join(", ");
+}
+
 function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
   const data = parserResult?.structured_data || {};
 
@@ -2213,6 +2244,7 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
     const companyName = firstNonEmpty(
       data.company_name, data.company, data.companyName, data.employer, data.organization, ""
     );
+    const location = extractLocationParts(data);
 
     return {
       FirstName: data.first_name || nameParts.firstName,
@@ -2234,17 +2266,17 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
           directNumber,
           firstNonEmpty(data.direct_extension, "")
         ),
-        StreetAddress: data.street_address || "",
-        City: data.city || "",
-        State: data.state || "",
-        PostalCode: data.postal_code || "",
-        Country: data.country || "USA"
+        StreetAddress: location.streetAddress,
+        City: location.city,
+        State: location.state,
+        PostalCode: location.postalCode,
+        Country: location.country || "USA"
       },
-      StreetAddress: data.street_address || "",
-      City: data.city || "",
-      State: data.state || "",
-      PostalCode: data.postal_code || "",
-      Country: data.country || "USA",
+      StreetAddress: location.streetAddress,
+      City: location.city,
+      State: location.state,
+      PostalCode: location.postalCode,
+      Country: location.country || "USA",
       EmailParserData: data,
       EmailParserConfidence: parserResult?.confidence_summary || ""
     };
@@ -2260,7 +2292,7 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
     JobTitle: data.job_title || "",
     CompanyName: data.company_name || "",
     ClientName: data.company_name || "",
-    Location: data.location || "",
+    Location: formatLocation(data),
     WorkMode: data.work_mode || "",
     EmploymentType: data.employment_type || "",
     ExperienceRequired: data.experience_required || "",
