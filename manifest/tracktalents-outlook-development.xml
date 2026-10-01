@@ -5,7 +5,7 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>0690e3a2-3e86-4f30-bd1b-4a0d60470bb5</Id>
-  <Version>1.0.10.0</Version>
+  <Version>1.0.11.0</Version>
   <ProviderName>TrackTalents</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="TrackTalents Outlook Development" />
@@ -109,8 +109,8 @@
         <bt:Image id="Icon.80" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20260924" />
-        <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20260924" />
+        <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20261001" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20261001" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="TrackTalents Development" />
@@ -188,8 +188,8 @@
           <bt:Image id="Icon.80" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/assets/icon-80.png" />
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20260924" />
-          <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20260924" />
+          <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20261001" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-development.up.railway.app/taskpane.html?v=development-20261001" />
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="TrackTalents Development" />

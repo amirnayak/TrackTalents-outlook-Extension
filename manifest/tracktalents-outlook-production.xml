@@ -5,7 +5,7 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xsi:type="MailApp">
   <Id>3ffa42d0-00b3-4dda-abb6-a11a6b3e925a</Id>
-  <Version>1.0.10.0</Version>
+  <Version>1.0.11.0</Version>
   <ProviderName>TrackTalents</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="TrackTalents Outlook" />
@@ -109,8 +109,8 @@
         <bt:Image id="Icon.80" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260929" />
-        <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260929" />
+        <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20261001" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20261001" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="TrackTalents" />
@@ -188,8 +188,8 @@
           <bt:Image id="Icon.80" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/assets/icon-80.png" />
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260929" />
-          <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20260929" />
+          <bt:Url id="Commands.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20261001" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://tracktalents-outlook-extension-production.up.railway.app/taskpane.html?v=production-20261001" />
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="TrackTalents" />
