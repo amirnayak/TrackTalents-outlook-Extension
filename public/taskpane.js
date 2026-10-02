@@ -2603,10 +2603,33 @@ function buildInlineOutlookImportFallback(outlookImport) {
     return null;
   }
 
+  const stripDocumentContent = (document) => {
+    if (!document || typeof document !== "object") {
+      return document;
+    }
+
+    const { Content, content, AttachmentBinary, attachmentBinary, ...metadata } = document;
+    return metadata;
+  };
+
+  const emailAddinRecord = outlookImport.emailAddinRecord && typeof outlookImport.emailAddinRecord === "object"
+    ? {
+        ...outlookImport.emailAddinRecord,
+        Documents: Array.isArray(outlookImport.emailAddinRecord.Documents)
+          ? outlookImport.emailAddinRecord.Documents.map(stripDocumentContent)
+          : outlookImport.emailAddinRecord.Documents
+      }
+    : outlookImport.emailAddinRecord || null;
+
   return {
     ...outlookImport,
-    // Raw attachment binaries can make the bridge URL too large. The session keeps the full payload.
+    // Keep this URL fallback small. The import session always contains the full
+    // parsed resume and document binaries used by the ATS.
     attachments: [],
+    documents: Array.isArray(outlookImport.documents)
+      ? outlookImport.documents.map(stripDocumentContent)
+      : [],
+    emailAddinRecord,
     selectedResume: outlookImport.selectedResume || null
   };
 }
