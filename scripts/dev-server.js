@@ -1760,49 +1760,60 @@ async function uploadAttachmentToTrackTalents(attachment, accessToken) {
 
 async function parseResumeWithTrackTalents(attachment, accessToken) {
   const startTime = Date.now();
-  let response;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let response;
 
-  try {
-    response = await fetch(new URL("resume/parse", API_HOST), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      },
-      body: buildAttachmentFormData(attachment),
-      signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+    try {
+      response = await fetch(new URL("resume/parse", API_HOST), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: buildAttachmentFormData(attachment),
+        signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+      });
+    } catch (error) {
+      if (error?.name === "TimeoutError") {
+        throw new Error(
+          `TrackTalents did not finish parsing "${attachment?.name || "the selected resume"}" within ${
+            Math.round(API_REQUEST_TIMEOUT_MS / 1000)
+          } seconds.`
+        );
+      }
+
+      throw error;
+    }
+
+    const data = await readApiResponse(response);
+    const parsedResumeData = normalizeResumeParseResponse(data);
+    const hasCandidateIdentity = hasResumeIdentity(parsedResumeData);
+    console.log("Resume parse completed", {
+      fileName: attachment?.name || "",
+      durationMs: Date.now() - startTime,
+      attempt,
+      ok: response.ok,
+      status: response.status,
+      responseType: Array.isArray(data) ? "array" : typeof data,
+      responseKeys: getObjectKeys(data),
+      parsedResponseKeys: getObjectKeys(parsedResumeData),
+      hasCandidateIdentity
     });
-  } catch (error) {
-    if (error?.name === "TimeoutError") {
+
+    if (!response.ok) {
       throw new Error(
-        `TrackTalents did not finish parsing "${attachment?.name || "the selected resume"}" within ${
-          Math.round(API_REQUEST_TIMEOUT_MS / 1000)
-        } seconds.`
+        extractApiMessage(data) ||
+          `TrackTalents could not parse "${attachment?.name || "the selected resume"}".`
       );
     }
 
-    throw error;
+    if (hasCandidateIdentity) {
+      return parsedResumeData;
+    }
   }
 
-  const data = await readApiResponse(response);
-  const parsedResumeData = normalizeResumeParseResponse(data);
-  console.log("Resume parse completed", {
-    fileName: attachment?.name || "",
-    durationMs: Date.now() - startTime,
-    ok: response.ok,
-    status: response.status,
-    responseKeys: getObjectKeys(data),
-    parsedResponseKeys: getObjectKeys(parsedResumeData),
-    hasCandidateIdentity: hasResumeIdentity(parsedResumeData)
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      extractApiMessage(data) ||
-        `TrackTalents could not parse "${attachment?.name || "the selected resume"}".`
-    );
-  }
-
-  return parsedResumeData;
+  throw new Error(
+    `TrackTalents returned no candidate details for "${attachment?.name || "the selected resume"}". Please try again.`
+  );
 }
 
 function getObjectKeys(value) {
@@ -1820,17 +1831,43 @@ function hasResumeIdentity(value) {
     String(value.FirstName || value.firstName || "").trim() ||
       String(value.LastName || value.lastName || "").trim() ||
       String(value.JobTitle || value.jobTitle || "").trim() ||
-      String(value.Contact?.Email1 || value.contact?.email1 || "").trim()
+      String(value.Contact?.Email1 || value.contact?.email1 || "").trim() ||
+      String(value.Contact?.CellNumber || value.contact?.cellNumber || "").trim() ||
+      (Array.isArray(value.WorkExperiences) && value.WorkExperiences.length > 0) ||
+      (Array.isArray(value.EducationDetails) && value.EducationDetails.length > 0)
   );
 }
 
-function normalizeResumeParseResponse(value) {
-  if (!value || typeof value !== "object") {
+function normalizeResumeParseResponse(value, depth = 0) {
+  if (depth > 8 || value === null || value === undefined) {
     return value;
   }
 
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+      return value;
+    }
+
+    try {
+      return normalizeResumeParseResponse(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return value;
+    }
+  }
+
   if (Array.isArray(value)) {
-    return value.length === 1 ? normalizeResumeParseResponse(value[0]) : value;
+    for (const item of value) {
+      const normalized = normalizeResumeParseResponse(item, depth + 1);
+      if (hasResumeIdentity(normalized)) {
+        return normalized;
+      }
+    }
+    return value;
+  }
+
+  if (typeof value !== "object") {
+    return value;
   }
 
   if (hasResumeIdentity(value)) {
@@ -1840,10 +1877,13 @@ function normalizeResumeParseResponse(value) {
   // TrackTalents deployments have returned both direct candidate data and
   // envelope responses (Data/data/Result/result). Keep the extension API
   // stable by returning the candidate object in either case.
-  for (const key of ["Data", "data", "Result", "result", "Resume", "resume", "CandidateData", "candidateData"]) {
+  for (const key of [
+    "Data", "data", "Result", "result", "Resume", "resume",
+    "CandidateData", "candidateData", "Value", "value"
+  ]) {
     const nested = value[key];
-    if (nested && typeof nested === "object") {
-      const normalized = normalizeResumeParseResponse(nested);
+    if (nested !== null && nested !== undefined) {
+      const normalized = normalizeResumeParseResponse(nested, depth + 1);
       if (hasResumeIdentity(normalized)) {
         return normalized;
       }
