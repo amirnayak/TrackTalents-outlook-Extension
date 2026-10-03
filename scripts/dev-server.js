@@ -1784,11 +1784,15 @@ async function parseResumeWithTrackTalents(attachment, accessToken) {
   }
 
   const data = await readApiResponse(response);
+  const parsedResumeData = normalizeResumeParseResponse(data);
   console.log("Resume parse completed", {
     fileName: attachment?.name || "",
     durationMs: Date.now() - startTime,
     ok: response.ok,
-    status: response.status
+    status: response.status,
+    responseKeys: getObjectKeys(data),
+    parsedResponseKeys: getObjectKeys(parsedResumeData),
+    hasCandidateIdentity: hasResumeIdentity(parsedResumeData)
   });
 
   if (!response.ok) {
@@ -1798,7 +1802,55 @@ async function parseResumeWithTrackTalents(attachment, accessToken) {
     );
   }
 
-  return data;
+  return parsedResumeData;
+}
+
+function getObjectKeys(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.keys(value).slice(0, 20)
+    : [];
+}
+
+function hasResumeIdentity(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Boolean(
+    String(value.FirstName || value.firstName || "").trim() ||
+      String(value.LastName || value.lastName || "").trim() ||
+      String(value.JobTitle || value.jobTitle || "").trim() ||
+      String(value.Contact?.Email1 || value.contact?.email1 || "").trim()
+  );
+}
+
+function normalizeResumeParseResponse(value) {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 1 ? normalizeResumeParseResponse(value[0]) : value;
+  }
+
+  if (hasResumeIdentity(value)) {
+    return value;
+  }
+
+  // TrackTalents deployments have returned both direct candidate data and
+  // envelope responses (Data/data/Result/result). Keep the extension API
+  // stable by returning the candidate object in either case.
+  for (const key of ["Data", "data", "Result", "result", "Resume", "resume", "CandidateData", "candidateData"]) {
+    const nested = value[key];
+    if (nested && typeof nested === "object") {
+      const normalized = normalizeResumeParseResponse(nested);
+      if (hasResumeIdentity(normalized)) {
+        return normalized;
+      }
+    }
+  }
+
+  return value;
 }
 
 async function readApiResponse(response) {
