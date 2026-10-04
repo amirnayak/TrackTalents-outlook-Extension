@@ -1786,6 +1786,16 @@ async function parseResumeWithTrackTalents(attachment, accessToken) {
     }
 
     const data = await readApiResponse(response);
+
+    // The TrackTalents resume endpoint can return HTTP 200 while its
+    // downstream parser is unavailable. Do not retry that terminal response
+    // or turn it into a misleading "no candidate details" message.
+    if (isResumeParserUnavailableResponse(data)) {
+      throw new Error(
+        "The TrackTalents resume parser service is currently unavailable. Please try again later."
+      );
+    }
+
     const parsedResumeData = canonicalizeResumeParseResponse(
       normalizeResumeParseResponse(data)
     );
@@ -1842,6 +1852,13 @@ function hasResumeIdentity(value) {
       String(value.Contact?.CellNumber || value.contact?.cellNumber || "").trim() ||
       (Array.isArray(value.WorkExperiences) && value.WorkExperiences.length > 0) ||
       (Array.isArray(value.EducationDetails) && value.EducationDetails.length > 0)
+  );
+}
+
+function isResumeParserUnavailableResponse(value) {
+  return (
+    typeof value === "string" &&
+    value.trim().toLowerCase() === "service is down"
   );
 }
 
