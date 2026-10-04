@@ -30,6 +30,7 @@ const ADDIN_PUBLIC_URL = process.env.ADDIN_PUBLIC_URL || "";
 const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || "100mb";
 const OUTLOOK_IMPORT_SESSION_TTL_MS = 15 * 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = Number(process.env.API_REQUEST_TIMEOUT_MS || 30000);
+const RESUME_PARSE_TIMEOUT_MS = Number(process.env.RESUME_PARSE_TIMEOUT_MS || 90000);
 const EMAIL_ADDIN_RECORD_CACHE_PATH = path.join(__dirname, "..", ".email-addin-record-cache.json");
 const app = express();
 const outlookImportSessions = new Map();
@@ -1770,13 +1771,13 @@ async function parseResumeWithTrackTalents(attachment, accessToken) {
           Authorization: `Bearer ${accessToken}`
         },
         body: buildAttachmentFormData(attachment),
-        signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+        signal: AbortSignal.timeout(RESUME_PARSE_TIMEOUT_MS)
       });
     } catch (error) {
       if (error?.name === "TimeoutError") {
         throw new Error(
           `TrackTalents did not finish parsing "${attachment?.name || "the selected resume"}" within ${
-            Math.round(API_REQUEST_TIMEOUT_MS / 1000)
+            Math.round(RESUME_PARSE_TIMEOUT_MS / 1000)
           } seconds.`
         );
       }
@@ -1785,7 +1786,9 @@ async function parseResumeWithTrackTalents(attachment, accessToken) {
     }
 
     const data = await readApiResponse(response);
-    const parsedResumeData = normalizeResumeParseResponse(data);
+    const parsedResumeData = canonicalizeResumeParseResponse(
+      normalizeResumeParseResponse(data)
+    );
     const hasCandidateIdentity = hasResumeIdentity(parsedResumeData);
     console.log("Resume parse completed", {
       fileName: attachment?.name || "",
@@ -1808,6 +1811,10 @@ async function parseResumeWithTrackTalents(attachment, accessToken) {
 
     if (hasCandidateIdentity) {
       return parsedResumeData;
+    }
+
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   }
 
@@ -1891,6 +1898,175 @@ function normalizeResumeParseResponse(value, depth = 0) {
   }
 
   return value;
+}
+
+function firstDefined(...values) {
+  const meaningful = values.find((value) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return Boolean(value.trim());
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value).length > 0;
+    return true;
+  });
+  return meaningful ?? values.find((value) => value !== null && value !== undefined);
+}
+
+function canonicalizeResumeParseResponse(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const contactSource = firstDefined(value.Contact, value.contact) || {};
+  const workExperienceSource = firstDefined(value.WorkExperiences, value.workExperiences);
+  const educationSource = firstDefined(value.EducationDetails, value.educationDetails);
+  const addressSource = firstDefined(value.Addresses, value.addresses);
+  const resumeSource = firstDefined(value.Resumes, value.resumes);
+  const skillSource = firstDefined(value.skills, value.Skills);
+
+  const workExperiences = Array.isArray(workExperienceSource)
+    ? workExperienceSource.map((experience) => ({
+        ...experience,
+        Employer: firstDefined(
+          experience?.Employer,
+          experience?.employer,
+          experience?.Company,
+          experience?.company,
+          experience?.CompanyName,
+          experience?.companyName
+        ),
+        JobTitle: firstDefined(
+          experience?.JobTitle,
+          experience?.jobTitle,
+          experience?.Title,
+          experience?.title,
+          experience?.Position,
+          experience?.position,
+          experience?.Designation,
+          experience?.designation
+        ),
+        JobLocation: firstDefined(
+          experience?.JobLocation,
+          experience?.jobLocation,
+          experience?.Location,
+          experience?.location
+        ),
+        StartDate: firstDefined(experience?.StartDate, experience?.startDate),
+        EndDate: firstDefined(experience?.EndDate, experience?.endDate)
+      }))
+    : [];
+
+  const educationDetails = Array.isArray(educationSource)
+    ? educationSource.map((education) => ({
+        ...education,
+        University: firstDefined(
+          education?.University,
+          education?.university,
+          education?.Institution,
+          education?.institution,
+          education?.School,
+          education?.school
+        ),
+        Degree: firstDefined(
+          education?.Degree,
+          education?.degree,
+          education?.DegreeName,
+          education?.degreeName
+        ),
+        DegreeType: firstDefined(
+          education?.DegreeType,
+          education?.degreeType,
+          education?.DegreeLevel,
+          education?.degreeLevel
+        ),
+        YearPassed: firstDefined(
+          education?.YearPassed,
+          education?.yearPassed,
+          education?.GraduationYear,
+          education?.graduationYear
+        )
+      }))
+    : [];
+
+  const addresses = Array.isArray(addressSource)
+    ? addressSource.map((address) => ({
+        ...address,
+        StreetAddress: firstDefined(address?.StreetAddress, address?.streetAddress, address?.street),
+        City: firstDefined(address?.City, address?.city),
+        State: firstDefined(address?.State, address?.state),
+        PostalCode: firstDefined(address?.PostalCode, address?.postalCode, address?.zipCode),
+        Country: firstDefined(address?.Country, address?.country)
+      }))
+    : [];
+
+  const resumes = Array.isArray(resumeSource)
+    ? resumeSource.map((resume) => ({
+        ...resume,
+        ResumeId: firstDefined(resume?.ResumeId, resume?.resumeId),
+        ResumeTitle: firstDefined(resume?.ResumeTitle, resume?.resumeTitle),
+        ResumeName: firstDefined(resume?.ResumeName, resume?.resumeName, resume?.fileName),
+        ResumeText: firstDefined(resume?.ResumeText, resume?.resumeText, resume?.text),
+        IsPrimary: firstDefined(resume?.IsPrimary, resume?.isPrimary)
+      }))
+    : [];
+
+  const latestExperience = workExperiences.find((experience) => experience?.JobTitle);
+
+  return {
+    ...value,
+    FirstName: firstDefined(value.FirstName, value.firstName, value.firstname),
+    LastName: firstDefined(value.LastName, value.lastName, value.lastname),
+    CandidateId: firstDefined(value.CandidateId, value.candidateId),
+    Contact: {
+      ...contactSource,
+      CellNumber: firstDefined(
+        contactSource.CellNumber,
+        contactSource.cellNumber,
+        contactSource.Mobile,
+        contactSource.mobile,
+        contactSource.Phone,
+        contactSource.phone
+      ),
+      WorkNumber: firstDefined(contactSource.WorkNumber, contactSource.workNumber),
+      DirectNumber: firstDefined(contactSource.DirectNumber, contactSource.directNumber),
+      Email1: firstDefined(
+        contactSource.Email1,
+        contactSource.email1,
+        contactSource.Email,
+        contactSource.email
+      ),
+      Email2: firstDefined(contactSource.Email2, contactSource.email2)
+    },
+    CurrentLocation: firstDefined(
+      value.CurrentLocation,
+      value.currentLocation,
+      value.Location,
+      value.location
+    ),
+    Relocation: firstDefined(value.Relocation, value.relocation),
+    WillingToRelocate: firstDefined(value.WillingToRelocate, value.willingToRelocate),
+    JobTitle: firstDefined(
+      value.JobTitle,
+      value.jobTitle,
+      value.CurrentJobTitle,
+      value.currentJobTitle,
+      value.Title,
+      value.title,
+      latestExperience?.JobTitle
+    ),
+    TotalExperience: firstDefined(value.TotalExperience, value.totalExperience),
+    EducationLevel: firstDefined(
+      value.EducationLevel,
+      value.educationLevel,
+      value.HighestEducation,
+      value.highestEducation
+    ),
+    WorkAuthorization: firstDefined(value.WorkAuthorization, value.workAuthorization),
+    Addresses: addresses,
+    WorkExperiences: workExperiences,
+    EducationDetails: educationDetails,
+    Resumes: resumes,
+    skills: Array.isArray(skillSource) ? skillSource : []
+  };
 }
 
 async function readApiResponse(response) {
