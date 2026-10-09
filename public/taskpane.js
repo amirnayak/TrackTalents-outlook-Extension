@@ -558,28 +558,36 @@ function buildAttachEmailSearchFilter(type, search) {
     return "";
   }
 
+  // Contacts/Perf expects each condition to be wrapped once before it is
+  // combined with the other conditions. This deliberately matches the ATS
+  // Contacts page's working filter shape. Passing the unwrapped shape makes
+  // the API silently ignore the filter, leaving every record visible.
+  const contains = (field) => [[field, "contains", value]];
+
   if (type === "candidates") {
     return JSON.stringify([
-      ["CandidateData.FirstName", "contains", value],
+      contains("CandidateData.FirstName"),
       "or",
-      ["CandidateData.LastName", "contains", value],
+      contains("CandidateData.LastName"),
       "or",
-      ["CandidateData.Contact.Email1", "contains", value],
+      contains("CandidateData.Contact.Email1"),
       "or",
-      ["CandidateData.JobTitle", "contains", value],
+      contains("CandidateData.JobTitle"),
       "or",
-      ["CandidateData.CurrentLocation", "contains", value]
+      contains("CandidateData.CurrentLocation")
     ]);
   }
 
   return JSON.stringify([
-    ["ContactData.Name", "contains", value],
+    contains("ContactData.FirstName"),
     "or",
-    ["ContactData.Contact.Email1", "contains", value],
+    contains("ContactData.LastName"),
     "or",
-    ["ContactData.CompanyName", "contains", value],
+    contains("ContactData.Contact.Email1"),
     "or",
-    ["ContactData.JobTitle", "contains", value]
+    contains("ContactData.CompanyName"),
+    "or",
+    contains("ContactData.JobTitle")
   ]);
 }
 
