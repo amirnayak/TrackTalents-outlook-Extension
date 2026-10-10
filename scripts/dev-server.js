@@ -1058,11 +1058,28 @@ async function fetchAttachEmailCandidates(accessToken, query) {
   if (search) {
     params.set("CandidateData.FirstName", search);
     params.set("CandidateData.LastName", search);
+    params.set("CandidateData.Contact.CellNumber", search);
+    params.set("CandidateData.Contact.WorkNumber", search);
     params.set("CandidateData.Contact.Email1", search);
     params.set("CandidateData.Contact.Email2", search);
     params.set("CandidateData.JobTitle", search);
+    params.set("CandidateData.JobCategory", search);
+    params.set("CandidateData.TotalExperience", search);
+    params.set("CandidateData.EducationLevel", search);
+    params.set("CandidateData.Rate", search);
+    params.set("CandidateData.WorkAuthorization", search);
     params.set("CandidateData.CurrentLocation", search);
     params.set("CandidateData.CandidateStatus", "");
+    params.set("CandidateData.NoticePeriod", search);
+    params.set("CandidateData.Source", search);
+    params.set("CandidateData.UserId", search);
+    params.set("CandidateData.Owners", search);
+    params.set("CandidateData.SkypeID", search);
+    params.set("CandidateData.SSN", search);
+    params.set("CandidateData.EmployeeNumber", search);
+    params.set("CandidateData.PassportNumber", search);
+    params.set("CandidateData.Relocation", search);
+    params.set("CandidateData.CandidateId", search);
   }
 
   const response = await fetch(new URL("v1/Candidates/Elastic", API_HOST), {
