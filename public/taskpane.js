@@ -1054,13 +1054,19 @@ function renderAttachEmailPanel() {
         </div>
 
         <div class="attach-email-toolbar">
-          <input
-            id="attach-email-search"
-            class="attach-email-search"
-            type="search"
-            placeholder="${escapeAttribute(searchPlaceholder)}"
-            value="${escapeAttribute(state.attachEmail.search)}"
-          />
+          <div class="attach-email-search-wrap">
+            <svg class="attach-email-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+              <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+            <input
+              id="attach-email-search"
+              class="attach-email-search"
+              type="search"
+              placeholder="${escapeAttribute(searchPlaceholder)}"
+              value="${escapeAttribute(state.attachEmail.search)}"
+            />
+          </div>
         </div>
 
         ${renderAttachEmailTable()}
