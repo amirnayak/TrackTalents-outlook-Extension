@@ -486,6 +486,10 @@ function closeImportModal() {
 }
 
 function openImportModal(actionId) {
+  // Outlook can keep the task pane alive while a user moves between emails.
+  // Re-read the attachment list at the start of every import so the selected
+  // attachment ID belongs to the message that is currently open.
+  getCurrentOfficeAttachmentsSnapshot();
   state.importModal = buildImportModalForAction(actionId);
   render();
 }
@@ -2841,26 +2845,53 @@ async function handleDirectActionLaunch(actionId) {
 }
 
 async function resolveAttachmentForImport(attachment) {
-  if (attachment?.content) {
-    return attachment;
+  const currentAttachment = resolveCurrentOfficeAttachment(attachment);
+
+  if (currentAttachment?.content) {
+    return currentAttachment;
   }
 
   if (state.currentItem?.mode === "preview") {
     return {
-      ...attachment,
+      ...currentAttachment,
       contentFormat: "base64",
       content: utf8TextToBase64(
-        attachment.previewText || `${attachment.name}\nTrackTalents preview attachment content`
+        currentAttachment.previewText ||
+          `${currentAttachment.name}\nTrackTalents preview attachment content`
       )
     };
   }
 
-  const contentResult = await readOfficeAttachmentContent(attachment.id);
+  const contentResult = await readOfficeAttachmentContent(
+    currentAttachment.id,
+    currentAttachment.name
+  );
   return {
-    ...attachment,
+    ...currentAttachment,
     contentFormat: normalizeAttachmentContentFormat(contentResult.format),
     content: String(contentResult.content || "")
   };
+}
+
+function resolveCurrentOfficeAttachment(attachment) {
+  const fallback = attachment || {};
+  const liveAttachments = getCurrentOfficeAttachmentsSnapshot();
+  const attachmentId = String(fallback.id || "");
+  const attachmentName = String(fallback.name || "");
+  const attachmentSize = Number(fallback.size || 0);
+
+  // Match by Office attachment ID first. Name and size provide a safe fallback
+  // when Outlook refreshes an attachment ID after the task pane is opened.
+  return (
+    liveAttachments.find((item) => attachmentId && item.id === attachmentId) ||
+    liveAttachments.find(
+      (item) =>
+        attachmentName &&
+        item.name === attachmentName &&
+        (!attachmentSize || !item.size || item.size === attachmentSize)
+    ) ||
+    fallback
+  );
 }
 
 async function prepareEmailAddinDocuments(attachments) {
@@ -2869,9 +2900,18 @@ async function prepareEmailAddinDocuments(attachments) {
     return [];
   }
 
-  const resolvedAttachments = await Promise.all(
+  const results = await Promise.allSettled(
     documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
   );
+  const resolvedAttachments = results
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  results
+    .filter((result) => result.status === "rejected")
+    .forEach((result) => {
+      console.warn("Unable to read an optional Outlook attachment.", result.reason);
+    });
 
   return prepareImportDocuments(resolvedAttachments);
 }
@@ -2887,7 +2927,25 @@ function utf8TextToBase64(value) {
   return btoa(binary);
 }
 
-function readOfficeAttachmentContent(attachmentId) {
+async function readOfficeAttachmentContent(attachmentId, attachmentName = "attachment") {
+  const attempts = 2;
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await readOfficeAttachmentContentOnce(attachmentId, attachmentName);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  throw lastError || new Error(`TrackTalents could not read "${attachmentName}" from Outlook.`);
+}
+
+function readOfficeAttachmentContentOnce(attachmentId, attachmentName) {
   return new Promise((resolve, reject) => {
     const item = window.Office?.context?.mailbox?.item;
     if (!item?.getAttachmentContentAsync) {
@@ -2899,10 +2957,14 @@ function readOfficeAttachmentContent(attachmentId) {
 
     item.getAttachmentContentAsync(attachmentId, (result) => {
       if (result.status !== Office.AsyncResultStatus.Succeeded) {
+        const detail = String(
+          result.error?.message || result.error?.name || result.error?.code || ""
+        ).trim();
         reject(
           new Error(
-            result.error?.message ||
-              "TrackTalents could not read one of the selected Outlook attachments."
+            detail
+              ? `TrackTalents could not read "${attachmentName}" from Outlook: ${detail}`
+              : `TrackTalents could not read "${attachmentName}" from Outlook.`
           )
         );
         return;
@@ -2956,7 +3018,7 @@ async function handleImportSubmit() {
     });
 
     const selectedResumeTask = resolveAttachmentForImport(selectedResume);
-    const resolvedDocumentAttachmentsTask = Promise.all(
+    const resolvedDocumentAttachmentsTask = Promise.allSettled(
       documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
     );
     const resolvedSelectedResume = await selectedResumeTask;
@@ -2967,10 +3029,19 @@ async function handleImportSubmit() {
       step: "parse-resume"
     });
 
-    const [parsedResumeData, resolvedDocumentAttachments] = await Promise.all([
+    const [parsedResumeData, documentAttachmentResults] = await Promise.all([
       parseResumeAttachment(resolvedSelectedResume),
       resolvedDocumentAttachmentsTask
     ]);
+    const resolvedDocumentAttachments = documentAttachmentResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    const unreadableDocuments = documentAttachmentResults.filter(
+      (result) => result.status === "rejected"
+    );
+    unreadableDocuments.forEach((result) => {
+      console.warn("Unable to read an optional Outlook attachment.", result.reason);
+    });
     logEmailAddinRecordDebug("Resume parsed", {
       fileName: resolvedSelectedResume?.name || "",
       hasParsedData: Boolean(parsedResumeData),
@@ -3020,7 +3091,14 @@ async function handleImportSubmit() {
         _id: recordId || payload?._id || "",
         Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       },
-      selectedResume: resumePreview
+      selectedResume: resumePreview,
+      warnings: unreadableDocuments.length
+        ? [
+            `${unreadableDocuments.length} additional Outlook attachment${
+              unreadableDocuments.length === 1 ? " was" : "s were"
+            } skipped because Outlook could not read it.`
+          ]
+        : []
     });
     const importSession = await createOutlookImportSession(outlookCandidateImport);
     logEmailAddinRecordDebug("Outlook import session created", {
