@@ -52,9 +52,7 @@ const ACTIONS = [
 
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
 const ATTACH_EMAIL_PAGE_SIZE = 25;
-const ATTACH_EMAIL_SEARCH_DEBOUNCE_MS = 350;
 
-let attachEmailSearchTimer = null;
 let attachEmailLoadSequence = 0;
 
 const state = {
@@ -121,6 +119,7 @@ function buildAttachEmailState() {
     open: false,
     activeTab: "contacts",
     search: "",
+    appliedSearch: "",
     loading: false,
     error: "",
     submitting: false,
@@ -553,11 +552,6 @@ function isAttachEmailSelected(type, recordId) {
 }
 
 function resetAttachEmailState() {
-  if (attachEmailSearchTimer) {
-    window.clearTimeout(attachEmailSearchTimer);
-    attachEmailSearchTimer = null;
-  }
-
   attachEmailLoadSequence += 1;
   state.attachEmail = buildAttachEmailState();
 }
@@ -643,7 +637,7 @@ function normalizeAttachEmailCandidate(record) {
 
 async function fetchAttachEmailRecords(type, options = {}) {
   const page = Math.max(0, Number(options.page || 0));
-  const search = String(options.search ?? state.attachEmail.search ?? "").trim();
+  const search = String(options.search ?? state.attachEmail.appliedSearch ?? "").trim();
   const skip = page * ATTACH_EMAIL_PAGE_SIZE;
   const filter = buildAttachEmailSearchFilter(type, search);
   const query = new URLSearchParams({
@@ -684,7 +678,7 @@ async function loadAttachEmailRecords(options = {}) {
   const loadSequence = ++attachEmailLoadSequence;
   const loadContacts = options.loadContacts !== false;
   const loadCandidates = options.loadCandidates !== false;
-  const search = String(options.search ?? state.attachEmail.search ?? "");
+  const search = String(options.search ?? state.attachEmail.appliedSearch ?? "");
   const contactsPage = Math.max(0, Number(options.contactsPage ?? state.attachEmail.contactsPage));
   const candidatesPage = Math.max(
     0,
@@ -773,32 +767,18 @@ async function loadAttachEmailRecords(options = {}) {
   }
 }
 
-function scheduleAttachEmailSearch() {
-  // Invalidate any request for an older search immediately. The replacement
-  // request starts after the debounce interval, once the user pauses typing.
-  attachEmailLoadSequence += 1;
+function submitAttachEmailSearch() {
+  state.attachEmail.appliedSearch = state.attachEmail.search.trim();
+  state.attachEmail.contactsPage = 0;
+  state.attachEmail.candidatesPage = 0;
 
-  if (attachEmailSearchTimer) {
-    window.clearTimeout(attachEmailSearchTimer);
-  }
-
-  const search = state.attachEmail.search;
-  attachEmailSearchTimer = window.setTimeout(() => {
-    attachEmailSearchTimer = null;
-
-    if (!state.attachEmail.open || state.attachEmail.search !== search) {
-      return;
-    }
-
-    void loadAttachEmailRecords({
-      loadContacts: true,
-      loadCandidates: true,
-      contactsPage: 0,
-      candidatesPage: 0,
-      search,
-      renderLoading: false
-    });
-  }, ATTACH_EMAIL_SEARCH_DEBOUNCE_MS);
+  void loadAttachEmailRecords({
+    loadContacts: true,
+    loadCandidates: true,
+    contactsPage: 0,
+    candidatesPage: 0,
+    search: state.attachEmail.appliedSearch
+  });
 }
 
 function openAttachEmailPanel() {
@@ -1103,10 +1083,17 @@ function renderAttachEmailPanel() {
 
         <div class="attach-email-toolbar">
           <div class="attach-email-search-wrap">
-            <svg class="attach-email-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
-              <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-            </svg>
+            <button
+              id="attach-email-search-button"
+              class="attach-email-search-button"
+              type="button"
+              aria-label="Search TrackTalents records"
+            >
+              <svg class="attach-email-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+                <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+            </button>
             <input
               id="attach-email-search"
               class="attach-email-search"
@@ -1655,10 +1642,21 @@ function bindEvents() {
   if (attachEmailSearch) {
     attachEmailSearch.addEventListener("input", (event) => {
       state.attachEmail.search = event.target.value;
-      state.attachEmail.contactsPage = 0;
-      state.attachEmail.candidatesPage = 0;
-      scheduleAttachEmailSearch();
     });
+
+    attachEmailSearch.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      submitAttachEmailSearch();
+    });
+  }
+
+  const attachEmailSearchButton = document.getElementById("attach-email-search-button");
+  if (attachEmailSearchButton) {
+    attachEmailSearchButton.addEventListener("click", submitAttachEmailSearch);
   }
 
   document.querySelectorAll("[data-attach-email-tab]").forEach((button) => {

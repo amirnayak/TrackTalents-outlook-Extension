@@ -857,15 +857,39 @@ input {
   position: relative;
 }
 
-.attach-email-search-icon {
+.attach-email-search-button {
   position: absolute;
   top: 50%;
-  left: 12px;
+  left: 6px;
+  z-index: 1;
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #717680;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.attach-email-search-button:hover,
+.attach-email-search-button:focus-visible {
+  background: #f4ebff;
+  color: #6941c6;
+}
+
+.attach-email-search-button:focus-visible {
+  outline: 2px solid rgba(127, 86, 217, 0.32);
+  outline-offset: 1px;
+}
+
+.attach-email-search-icon {
   width: 16px;
   height: 16px;
-  color: #717680;
   pointer-events: none;
-  transform: translateY(-50%);
 }
 
 .attach-email-search {
