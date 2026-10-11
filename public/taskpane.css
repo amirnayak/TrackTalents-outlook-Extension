@@ -875,15 +875,18 @@ input {
   border-radius: 8px;
   padding: 0 36px;
   background: #ffffff;
-  color: #181d27;
+  color: #101828 !important;
+  -webkit-text-fill-color: #101828 !important;
+  caret-color: #6941c6;
   font-size: 14px;
   line-height: 20px;
   box-shadow: 0 1px 2px rgba(10, 13, 18, 0.05);
 }
 
 .attach-email-search::placeholder {
-  color: #717680;
-  opacity: 1;
+  color: #475467 !important;
+  -webkit-text-fill-color: #475467 !important;
+  opacity: 1 !important;
 }
 
 .attach-email-search:focus {
