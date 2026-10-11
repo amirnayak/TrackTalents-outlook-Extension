@@ -52,6 +52,10 @@ const ACTIONS = [
 
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
 const ATTACH_EMAIL_PAGE_SIZE = 25;
+const ATTACH_EMAIL_SEARCH_DEBOUNCE_MS = 350;
+
+let attachEmailSearchTimer = null;
+let attachEmailLoadSequence = 0;
 
 const state = {
   officeReady: false,
@@ -549,6 +553,12 @@ function isAttachEmailSelected(type, recordId) {
 }
 
 function resetAttachEmailState() {
+  if (attachEmailSearchTimer) {
+    window.clearTimeout(attachEmailSearchTimer);
+    attachEmailSearchTimer = null;
+  }
+
+  attachEmailLoadSequence += 1;
   state.attachEmail = buildAttachEmailState();
 }
 
@@ -671,8 +681,10 @@ async function fetchAttachEmailRecords(type, options = {}) {
 }
 
 async function loadAttachEmailRecords(options = {}) {
+  const loadSequence = ++attachEmailLoadSequence;
   const loadContacts = options.loadContacts !== false;
   const loadCandidates = options.loadCandidates !== false;
+  const search = String(options.search ?? state.attachEmail.search ?? "");
   const contactsPage = Math.max(0, Number(options.contactsPage ?? state.attachEmail.contactsPage));
   const candidatesPage = Math.max(
     0,
@@ -693,7 +705,7 @@ async function loadAttachEmailRecords(options = {}) {
       tasks.push(
         fetchAttachEmailRecords("contacts", {
           page: contactsPage,
-          search: state.attachEmail.search
+          search
         }).then((result) => ({
           type: "contacts",
           result
@@ -705,7 +717,7 @@ async function loadAttachEmailRecords(options = {}) {
       tasks.push(
         fetchAttachEmailRecords("candidates", {
           page: candidatesPage,
-          search: state.attachEmail.search
+          search
         }).then((result) => ({
           type: "candidates",
           result
@@ -714,6 +726,10 @@ async function loadAttachEmailRecords(options = {}) {
     }
 
     const results = await Promise.allSettled(tasks);
+
+    if (loadSequence !== attachEmailLoadSequence) {
+      return;
+    }
 
     const errors = [];
 
@@ -746,11 +762,43 @@ async function loadAttachEmailRecords(options = {}) {
     state.attachEmail.error = errors[0] || "";
     render();
   } catch (error) {
+    if (loadSequence !== attachEmailLoadSequence) {
+      return;
+    }
+
     state.attachEmail.loading = false;
     state.attachEmail.error =
       error instanceof Error ? error.message : "Unable to load TrackTalents records.";
     render();
   }
+}
+
+function scheduleAttachEmailSearch() {
+  // Invalidate any request for an older search immediately. The replacement
+  // request starts after the debounce interval, once the user pauses typing.
+  attachEmailLoadSequence += 1;
+
+  if (attachEmailSearchTimer) {
+    window.clearTimeout(attachEmailSearchTimer);
+  }
+
+  const search = state.attachEmail.search;
+  attachEmailSearchTimer = window.setTimeout(() => {
+    attachEmailSearchTimer = null;
+
+    if (!state.attachEmail.open || state.attachEmail.search !== search) {
+      return;
+    }
+
+    void loadAttachEmailRecords({
+      loadContacts: true,
+      loadCandidates: true,
+      contactsPage: 0,
+      candidatesPage: 0,
+      search,
+      renderLoading: false
+    });
+  }, ATTACH_EMAIL_SEARCH_DEBOUNCE_MS);
 }
 
 function openAttachEmailPanel() {
@@ -1405,6 +1453,10 @@ function renderImportModal() {
 
 function render() {
   const root = getRoot();
+  const activeElement = document.activeElement;
+  const restoreAttachEmailSearchFocus = activeElement?.id === "attach-email-search";
+  const searchSelectionStart = restoreAttachEmailSearchFocus ? activeElement.selectionStart : null;
+  const searchSelectionEnd = restoreAttachEmailSearchFocus ? activeElement.selectionEnd : null;
   const authLabel = isAuthenticated() ? "Logout" : "Login";
   const authButtonId = isAuthenticated() ? "logout-button" : "open-login-button";
 
@@ -1451,6 +1503,21 @@ function render() {
   `;
 
   bindEvents();
+
+  if (restoreAttachEmailSearchFocus && state.attachEmail.open) {
+    const nextSearchInput = document.getElementById("attach-email-search");
+    if (nextSearchInput) {
+      nextSearchInput.focus({ preventScroll: true });
+
+      if (searchSelectionStart !== null && searchSelectionEnd !== null) {
+        const valueLength = nextSearchInput.value.length;
+        nextSearchInput.setSelectionRange(
+          Math.min(searchSelectionStart, valueLength),
+          Math.min(searchSelectionEnd, valueLength)
+        );
+      }
+    }
+  }
 }
 
 function renderActionButton(action) {
@@ -1590,13 +1657,7 @@ function bindEvents() {
       state.attachEmail.search = event.target.value;
       state.attachEmail.contactsPage = 0;
       state.attachEmail.candidatesPage = 0;
-      void loadAttachEmailRecords({
-        loadContacts: true,
-        loadCandidates: true,
-        contactsPage: 0,
-        candidatesPage: 0,
-        renderLoading: false
-      });
+      scheduleAttachEmailSearch();
     });
   }
 
