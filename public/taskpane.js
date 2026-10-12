@@ -53,6 +53,8 @@ const ACTIONS = [
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
 const ATTACH_EMAIL_PAGE_SIZE = 25;
 
+let attachEmailLoadSequence = 0;
+
 const state = {
   officeReady: false,
   officeHost: null,
@@ -117,6 +119,7 @@ function buildAttachEmailState() {
     open: false,
     activeTab: "contacts",
     search: "",
+    appliedSearch: "",
     loading: false,
     error: "",
     submitting: false,
@@ -549,6 +552,7 @@ function isAttachEmailSelected(type, recordId) {
 }
 
 function resetAttachEmailState() {
+  attachEmailLoadSequence += 1;
   state.attachEmail = buildAttachEmailState();
 }
 
@@ -633,7 +637,7 @@ function normalizeAttachEmailCandidate(record) {
 
 async function fetchAttachEmailRecords(type, options = {}) {
   const page = Math.max(0, Number(options.page || 0));
-  const search = String(options.search ?? state.attachEmail.search ?? "").trim();
+  const search = String(options.search ?? state.attachEmail.appliedSearch ?? "").trim();
   const skip = page * ATTACH_EMAIL_PAGE_SIZE;
   const filter = buildAttachEmailSearchFilter(type, search);
   const query = new URLSearchParams({
@@ -671,8 +675,10 @@ async function fetchAttachEmailRecords(type, options = {}) {
 }
 
 async function loadAttachEmailRecords(options = {}) {
+  const loadSequence = ++attachEmailLoadSequence;
   const loadContacts = options.loadContacts !== false;
   const loadCandidates = options.loadCandidates !== false;
+  const search = String(options.search ?? state.attachEmail.appliedSearch ?? "");
   const contactsPage = Math.max(0, Number(options.contactsPage ?? state.attachEmail.contactsPage));
   const candidatesPage = Math.max(
     0,
@@ -693,7 +699,7 @@ async function loadAttachEmailRecords(options = {}) {
       tasks.push(
         fetchAttachEmailRecords("contacts", {
           page: contactsPage,
-          search: state.attachEmail.search
+          search
         }).then((result) => ({
           type: "contacts",
           result
@@ -705,7 +711,7 @@ async function loadAttachEmailRecords(options = {}) {
       tasks.push(
         fetchAttachEmailRecords("candidates", {
           page: candidatesPage,
-          search: state.attachEmail.search
+          search
         }).then((result) => ({
           type: "candidates",
           result
@@ -714,6 +720,10 @@ async function loadAttachEmailRecords(options = {}) {
     }
 
     const results = await Promise.allSettled(tasks);
+
+    if (loadSequence !== attachEmailLoadSequence) {
+      return;
+    }
 
     const errors = [];
 
@@ -746,11 +756,29 @@ async function loadAttachEmailRecords(options = {}) {
     state.attachEmail.error = errors[0] || "";
     render();
   } catch (error) {
+    if (loadSequence !== attachEmailLoadSequence) {
+      return;
+    }
+
     state.attachEmail.loading = false;
     state.attachEmail.error =
       error instanceof Error ? error.message : "Unable to load TrackTalents records.";
     render();
   }
+}
+
+function submitAttachEmailSearch() {
+  state.attachEmail.appliedSearch = state.attachEmail.search.trim();
+  state.attachEmail.contactsPage = 0;
+  state.attachEmail.candidatesPage = 0;
+
+  void loadAttachEmailRecords({
+    loadContacts: true,
+    loadCandidates: true,
+    contactsPage: 0,
+    candidatesPage: 0,
+    search: state.attachEmail.appliedSearch
+  });
 }
 
 function openAttachEmailPanel() {
@@ -1055,10 +1083,17 @@ function renderAttachEmailPanel() {
 
         <div class="attach-email-toolbar">
           <div class="attach-email-search-wrap">
-            <svg class="attach-email-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
-              <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-            </svg>
+            <button
+              id="attach-email-search-button"
+              class="attach-email-search-button"
+              type="button"
+              aria-label="Search TrackTalents records"
+            >
+              <svg class="attach-email-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+                <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+            </button>
             <input
               id="attach-email-search"
               class="attach-email-search"
@@ -1405,6 +1440,10 @@ function renderImportModal() {
 
 function render() {
   const root = getRoot();
+  const activeElement = document.activeElement;
+  const restoreAttachEmailSearchFocus = activeElement?.id === "attach-email-search";
+  const searchSelectionStart = restoreAttachEmailSearchFocus ? activeElement.selectionStart : null;
+  const searchSelectionEnd = restoreAttachEmailSearchFocus ? activeElement.selectionEnd : null;
   const authLabel = isAuthenticated() ? "Logout" : "Login";
   const authButtonId = isAuthenticated() ? "logout-button" : "open-login-button";
 
@@ -1451,6 +1490,21 @@ function render() {
   `;
 
   bindEvents();
+
+  if (restoreAttachEmailSearchFocus && state.attachEmail.open) {
+    const nextSearchInput = document.getElementById("attach-email-search");
+    if (nextSearchInput) {
+      nextSearchInput.focus({ preventScroll: true });
+
+      if (searchSelectionStart !== null && searchSelectionEnd !== null) {
+        const valueLength = nextSearchInput.value.length;
+        nextSearchInput.setSelectionRange(
+          Math.min(searchSelectionStart, valueLength),
+          Math.min(searchSelectionEnd, valueLength)
+        );
+      }
+    }
+  }
 }
 
 function renderActionButton(action) {
@@ -1588,16 +1642,21 @@ function bindEvents() {
   if (attachEmailSearch) {
     attachEmailSearch.addEventListener("input", (event) => {
       state.attachEmail.search = event.target.value;
-      state.attachEmail.contactsPage = 0;
-      state.attachEmail.candidatesPage = 0;
-      void loadAttachEmailRecords({
-        loadContacts: true,
-        loadCandidates: true,
-        contactsPage: 0,
-        candidatesPage: 0,
-        renderLoading: false
-      });
     });
+
+    attachEmailSearch.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      submitAttachEmailSearch();
+    });
+  }
+
+  const attachEmailSearchButton = document.getElementById("attach-email-search-button");
+  if (attachEmailSearchButton) {
+    attachEmailSearchButton.addEventListener("click", submitAttachEmailSearch);
   }
 
   document.querySelectorAll("[data-attach-email-tab]").forEach((button) => {
