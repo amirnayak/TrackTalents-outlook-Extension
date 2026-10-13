@@ -781,6 +781,17 @@ function submitAttachEmailSearch() {
   });
 }
 
+function updateAttachEmailSearch(value) {
+  const search = String(value || "");
+  state.attachEmail.search = search;
+
+  // Clear controls do not require Enter. As soon as the input becomes empty,
+  // reset the server filter and return both lists to their first page.
+  if (!search.trim() && state.attachEmail.appliedSearch) {
+    submitAttachEmailSearch();
+  }
+}
+
 function openAttachEmailPanel() {
   state.attachEmail = buildAttachEmailState();
   state.attachEmail.open = true;
@@ -1641,7 +1652,12 @@ function bindEvents() {
   const attachEmailSearch = document.getElementById("attach-email-search");
   if (attachEmailSearch) {
     attachEmailSearch.addEventListener("input", (event) => {
-      state.attachEmail.search = event.target.value;
+      updateAttachEmailSearch(event.target.value);
+    });
+
+    // Chrome also dispatches this native event for the X clear control.
+    attachEmailSearch.addEventListener("search", (event) => {
+      updateAttachEmailSearch(event.target.value);
     });
 
     attachEmailSearch.addEventListener("keydown", (event) => {
