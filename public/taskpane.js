@@ -1175,7 +1175,15 @@ function handleActionRequest(actionId) {
     return;
   }
 
-  void handleDirectActionLaunch(actionId);
+  // The direct actions do asynchronous parsing and session creation before
+  // launching ATS. Reserve the browser window while this click still has a
+  // user gesture so Chrome does not replace the eventual launch with
+  // about:blank#blocked.
+  const launchWindow =
+    state.auth?.accessToken && !isTokenExpired(state.auth)
+      ? reserveActionWindow()
+      : null;
+  void handleDirectActionLaunch(actionId, launchWindow);
 }
 
 function buildAttachmentBadgeMarkup(count) {
@@ -2756,7 +2764,37 @@ function buildAuthBridgeUrl(actionId, bridgeData = {}) {
   return `${buildAbsoluteAppUrl(state.config.authBridgePath)}#${hash.toString()}`;
 }
 
-function safeOpenWindow(url) {
+function reserveActionWindow() {
+  try {
+    return window.open("", "_blank");
+  } catch {
+    return null;
+  }
+}
+
+function closeReservedActionWindow(launchWindow) {
+  if (!launchWindow || launchWindow.closed) return;
+
+  try {
+    launchWindow.close();
+  } catch {
+    // The original action can still surface its error in the task pane.
+  }
+}
+
+function safeOpenWindow(url, launchWindow = null) {
+  if (launchWindow && !launchWindow.closed) {
+    try {
+      launchWindow.location.replace(url);
+      // Do not leave the ATS window connected to the Outlook task pane once
+      // it has navigated away from the temporary blank document.
+      launchWindow.opener = null;
+      return;
+    } catch {
+      closeReservedActionWindow(launchWindow);
+    }
+  }
+
   if (window.Office?.context?.ui?.openBrowserWindow) {
     Office.context.ui.openBrowserWindow(url);
     return;
@@ -2774,7 +2812,7 @@ function launchAction(actionId, options = {}) {
       emailAddinRecord: options.emailAddinRecord,
       selectedResume: options.selectedResume
     });
-    safeOpenWindow(url);
+    safeOpenWindow(url, options.launchWindow);
     state.launchMessage = "";
     state.actionLaunch = {
       active: false,
@@ -2795,13 +2833,15 @@ function launchAction(actionId, options = {}) {
   }
 }
 
-async function handleDirectActionLaunch(actionId) {
+async function handleDirectActionLaunch(actionId, launchWindow = null) {
   if (isTokenExpired(state.auth)) {
+    closeReservedActionWindow(launchWindow);
     openSessionExpiredNotice(actionId);
     return;
   }
 
   if (!state.auth?.accessToken) {
+    closeReservedActionWindow(launchWindow);
     state.pendingActionId = actionId;
     state.showLoginModal = true;
     state.loginError = "";
@@ -2907,9 +2947,11 @@ async function handleDirectActionLaunch(actionId) {
     launchAction(actionId, {
       outlookCandidateImport: buildInlineOutlookImportFallback(outlookActionImport),
       outlookImportSessionId: importSession.sessionId,
-      outlookImportApiHost: importSession.apiHost
+      outlookImportApiHost: importSession.apiHost,
+      launchWindow
     });
   } catch (error) {
+    closeReservedActionWindow(launchWindow);
     logEmailAddinRecordDebug("Submit error", {
       actionId,
       message: error instanceof Error ? error.message : String(error)
@@ -3084,6 +3126,11 @@ async function handleImportSubmit() {
     return;
   }
 
+  // Reserve this popup in the synchronous Import-click handler. Resume
+  // parsing and import-session creation are asynchronous, and opening the
+  // page only after they finish causes Chrome to block it.
+  const launchWindow = reserveActionWindow();
+
   state.importModal.submitting = true;
   state.importModal.error = "";
   render();
@@ -3190,9 +3237,11 @@ async function handleImportSubmit() {
     launchAction(actionId, {
       outlookCandidateImport: buildInlineOutlookImportFallback(outlookCandidateImport),
       outlookImportSessionId: importSession.sessionId,
-      outlookImportApiHost: importSession.apiHost
+      outlookImportApiHost: importSession.apiHost,
+      launchWindow
     });
   } catch (error) {
+    closeReservedActionWindow(launchWindow);
     logEmailAddinRecordDebug("Submit error", {
       message: error instanceof Error ? error.message : String(error)
     });
