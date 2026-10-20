@@ -490,8 +490,11 @@ function closeImportModal() {
 
 function openImportModal(actionId) {
   // Outlook can keep the task pane alive while a user moves between emails.
-  // Re-read the attachment list at the start of every import so the selected
-  // attachment ID belongs to the message that is currently open.
+  // Re-read the complete message at the start of every import so the sender,
+  // recipients, and selected attachment all belong to the message currently
+  // open in Outlook. Relying only on ItemChanged can leave an older message in
+  // memory when the task pane stays open while the user switches emails.
+  readCurrentItem();
   getCurrentOfficeAttachmentsSnapshot();
   state.importModal = buildImportModalForAction(actionId);
   render();
@@ -1165,6 +1168,11 @@ function renderAttachEmailPanel() {
 }
 
 function handleActionRequest(actionId) {
+  // Capture the currently open Outlook item synchronously on the user's
+  // action click. This prevents a previous message's sender from being used
+  // as the contact for Submit Resume To Contact.
+  readCurrentItem();
+
   if (isAttachEmailAction(actionId)) {
     openAttachEmailPanel();
     return;
@@ -2766,7 +2774,22 @@ function buildAuthBridgeUrl(actionId, bridgeData = {}) {
 
 function reserveActionWindow() {
   try {
-    return window.open("", "_blank");
+    const launchWindow = window.open("about:blank", "_blank");
+
+    if (launchWindow && !launchWindow.closed) {
+      launchWindow.document.title = "TrackTalents";
+      launchWindow.document.body.innerHTML = `
+        <main style="min-height:100vh;display:grid;place-items:center;font-family:Arial,sans-serif;background:#f8f7ff;color:#20263a">
+          <div style="text-align:center;padding:32px">
+            <div style="width:38px;height:38px;margin:0 auto 18px;border:4px solid #ddd6fe;border-top-color:#7c3aed;border-radius:50%;animation:tracktalents-spin .8s linear infinite"></div>
+            <h1 style="font-size:20px;margin:0 0 8px">Preparing your TrackTalents action</h1>
+            <p style="font-size:14px;margin:0;color:#667085">Please keep this tab open while the attachment is processed.</p>
+          </div>
+          <style>@keyframes tracktalents-spin{to{transform:rotate(360deg)}}</style>
+        </main>`;
+    }
+
+    return launchWindow;
   } catch {
     return null;
   }
@@ -2786,9 +2809,11 @@ function safeOpenWindow(url, launchWindow = null) {
   if (launchWindow && !launchWindow.closed) {
     try {
       launchWindow.location.replace(url);
-      // Do not leave the ATS window connected to the Outlook task pane once
-      // it has navigated away from the temporary blank document.
-      launchWindow.opener = null;
+      // Do not touch `opener` after navigation. The destination is normally
+      // a different origin from the Outlook task pane (for example,
+      // https://localhost:3201 -> http://localhost:3000). Accessing it then
+      // can throw a cross-origin error, which used to close the reserved
+      // window and leave the user with no ATS handoff at all.
       return;
     } catch {
       closeReservedActionWindow(launchWindow);
@@ -2850,6 +2875,9 @@ async function handleDirectActionLaunch(actionId, launchWindow = null) {
   }
 
   try {
+    // ItemChanged is not guaranteed to have completed before a user presses
+    // an action. Refresh once more immediately before building the handoff.
+    readCurrentItem();
     state.launchMessage = "";
     state.actionLaunch = {
       active: true,
@@ -3100,6 +3128,10 @@ function readOfficeAttachmentContentOnce(attachmentId, attachmentName) {
 
 async function handleImportSubmit() {
   const actionId = state.importModal.actionId || "add-candidate";
+  // Keep the message metadata in sync with the attachment picker. In
+  // particular, Submit Resume To Contact must use the sender from the email
+  // that is currently open, never the previous Outlook item.
+  readCurrentItem();
   const summary = getImportSummary();
   const selectedResume = summary.selectedResume;
   const documentAttachments = state.importModal.attachments.filter(
@@ -3126,10 +3158,13 @@ async function handleImportSubmit() {
     return;
   }
 
-  // Reserve this popup in the synchronous Import-click handler. Resume
-  // parsing and import-session creation are asynchronous, and opening the
-  // page only after they finish causes Chrome to block it.
-  const launchWindow = reserveActionWindow();
+  // Office provides its own browser-window API, which can safely be called
+  // after the asynchronous import work completes. In the standalone/local
+  // preview, reserve a tab during this Import click so the browser does not
+  // block the final ATS navigation as an unsolicited popup.
+  const canUseOfficeBrowserWindow =
+    typeof window.Office?.context?.ui?.openBrowserWindow === "function";
+  const launchWindow = canUseOfficeBrowserWindow ? null : reserveActionWindow();
 
   state.importModal.submitting = true;
   state.importModal.error = "";
@@ -3137,6 +3172,21 @@ async function handleImportSubmit() {
 
   try {
     const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
+    const contactParserTask = actionId === "submit-resume-contact"
+      ? parseCurrentEmailForAction(actionId)
+          .then((result) => ({
+            result,
+            warnings: Array.isArray(result?.warnings) ? result.warnings : []
+          }))
+          .catch((error) => ({
+            result: null,
+            warnings: [
+              error instanceof Error
+                ? error.message
+                : "Unable to parse the Outlook contact details."
+            ]
+          }))
+      : Promise.resolve({ result: null, warnings: [] });
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -3157,9 +3207,10 @@ async function handleImportSubmit() {
       step: "parse-resume"
     });
 
-    const [parsedResumeData, documentAttachmentResults] = await Promise.all([
+    const [parsedResumeData, documentAttachmentResults, contactParser] = await Promise.all([
       parseResumeAttachment(resolvedSelectedResume),
-      resolvedDocumentAttachmentsTask
+      resolvedDocumentAttachmentsTask,
+      contactParserTask
     ]);
     const resolvedDocumentAttachments = documentAttachmentResults
       .filter((result) => result.status === "fulfilled")
@@ -3220,13 +3271,17 @@ async function handleImportSubmit() {
         Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       },
       selectedResume: resumePreview,
-      warnings: unreadableDocuments.length
-        ? [
+      emailParserResult: contactParser.result,
+      warnings: [
+        ...(unreadableDocuments.length
+          ? [
             `${unreadableDocuments.length} additional Outlook attachment${
               unreadableDocuments.length === 1 ? " was" : "s were"
             } skipped because Outlook could not read it.`
           ]
-        : []
+          : []),
+        ...contactParser.warnings
+      ]
     });
     const importSession = await createOutlookImportSession(outlookCandidateImport);
     logEmailAddinRecordDebug("Outlook import session created", {
@@ -3238,6 +3293,8 @@ async function handleImportSubmit() {
       outlookCandidateImport: buildInlineOutlookImportFallback(outlookCandidateImport),
       outlookImportSessionId: importSession.sessionId,
       outlookImportApiHost: importSession.apiHost,
+      emailAddinRecord: outlookCandidateImport.emailAddinRecord,
+      selectedResume: outlookCandidateImport.selectedResume,
       launchWindow
     });
   } catch (error) {
@@ -3320,9 +3377,14 @@ function setItemStateFromOffice(item) {
     mode: "outlook"
   };
 
+  const itemId = state.currentItem.itemId;
+
   if (item.body?.getAsync) {
     item.body.getAsync(Office.CoercionType.Text, (result) => {
-      if (result.status === Office.AsyncResultStatus.Succeeded && state.currentItem) {
+      if (
+        result.status === Office.AsyncResultStatus.Succeeded &&
+        state.currentItem?.itemId === itemId
+      ) {
         state.currentItem.bodyPreview = String(result.value || "")
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n")
@@ -3332,7 +3394,10 @@ function setItemStateFromOffice(item) {
     });
 
     item.body.getAsync(Office.CoercionType.Html, (result) => {
-      if (result.status === Office.AsyncResultStatus.Succeeded && state.currentItem) {
+      if (
+        result.status === Office.AsyncResultStatus.Succeeded &&
+        state.currentItem?.itemId === itemId
+      ) {
         state.currentItem.bodyHtml = String(result.value || "").trim();
         render();
       }
