@@ -2830,12 +2830,20 @@ function safeOpenWindow(url, launchWindow = null) {
 
 function launchAction(actionId, options = {}) {
   try {
+    const hasImportSession = Boolean(
+      String(options.outlookImportSessionId || "").trim() &&
+      String(options.outlookImportApiHost || "").trim()
+    );
     const url = buildAuthBridgeUrl(actionId, {
-      outlookCandidateImport: options.outlookCandidateImport,
+      // The complete import is already stored behind this short-lived session.
+      // Repeating parsed resume/email data in the hash can make the URL large
+      // enough that Chrome leaves the reserved action tab on about:blank.
+      // Keep the inline data only for legacy flows that have no session.
+      outlookCandidateImport: hasImportSession ? null : options.outlookCandidateImport,
       outlookImportSessionId: options.outlookImportSessionId,
       outlookImportApiHost: options.outlookImportApiHost,
-      emailAddinRecord: options.emailAddinRecord,
-      selectedResume: options.selectedResume
+      emailAddinRecord: hasImportSession ? null : options.emailAddinRecord,
+      selectedResume: hasImportSession ? null : options.selectedResume
     });
     safeOpenWindow(url, options.launchWindow);
     state.launchMessage = "";
