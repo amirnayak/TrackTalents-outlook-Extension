@@ -222,7 +222,7 @@ function isAddCandidateAction(actionId) {
 }
 
 function isResumeImportAction(actionId) {
-  return actionId === "add-candidate" || actionId === "source-resume-job";
+  return ["add-candidate", "source-resume-job", "submit-resume-contact"].includes(actionId);
 }
 
 function isAttachEmailAction(actionId) {
@@ -254,8 +254,7 @@ function getEmailAddinRecordType(actionId) {
 }
 
 function formatContextId(item) {
-  const source = item?.itemId || "preview-context";
-  return String(source).replace(/[^a-zA-Z0-9]/g, "").slice(0, 18) || "previewcontext";
+  return String(item?.internetMessageId || item?.itemId || "preview-context");
 }
 
 function formatFileSize(bytes) {
@@ -2758,7 +2757,7 @@ function buildAuthBridgeUrl(actionId, bridgeData = {}) {
     userId: state.auth?.userId || bridgeLoginData.userId || bridgeLoginData.UserId || "",
     mId: state.auth?.mId || bridgeLoginData.MId || "",
     loginData: bridgeLoginData,
-    outlookCandidateImport: bridgeData.outlookCandidateImport || null,
+    outlookCandidateImport: bridgeData.outlookImportSessionId ? null : bridgeData.outlookCandidateImport || null,
     outlookImportSessionId: bridgeData.outlookImportSessionId || "",
     outlookImportApiHost: bridgeData.outlookImportApiHost || "",
     emailAddinRecord: bridgeData.emailAddinRecord || null,
