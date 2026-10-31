@@ -53,6 +53,8 @@ const ACTIONS = [
 const AUTH_STORAGE_KEY = "tracktalents-outlook-auth";
 const ATTACH_EMAIL_PAGE_SIZE = 25;
 
+let attachEmailLoadSequence = 0;
+
 const state = {
   officeReady: false,
   officeHost: null,
@@ -72,6 +74,10 @@ const state = {
   pendingActionId: null,
   showLoginModal: false,
   sessionNoticeOpen: false,
+  actionLaunch: {
+    active: false,
+    actionId: null
+  },
   attachEmail: buildAttachEmailState(),
   importModal: buildImportModalState(),
   loginForm: {
@@ -113,6 +119,7 @@ function buildAttachEmailState() {
     open: false,
     activeTab: "contacts",
     search: "",
+    appliedSearch: "",
     loading: false,
     error: "",
     submitting: false,
@@ -189,6 +196,8 @@ function buildPreviewItem() {
         email: "hiring@tracktalents.com"
       }
     ],
+    cc: [],
+    sentAt: "",
     fromDisplay: "Ananya Sharma <ananya.sharma@example.com>",
     toCount: 1,
     attachments,
@@ -479,6 +488,13 @@ function closeImportModal() {
 }
 
 function openImportModal(actionId) {
+  // Outlook can keep the task pane alive while a user moves between emails.
+  // Re-read the complete message at the start of every import so the sender,
+  // recipients, and selected attachment all belong to the message currently
+  // open in Outlook. Relying only on ItemChanged can leave an older message in
+  // memory when the task pane stays open while the user switches emails.
+  readCurrentItem();
+  getCurrentOfficeAttachmentsSnapshot();
   state.importModal = buildImportModalForAction(actionId);
   render();
 }
@@ -538,6 +554,7 @@ function isAttachEmailSelected(type, recordId) {
 }
 
 function resetAttachEmailState() {
+  attachEmailLoadSequence += 1;
   state.attachEmail = buildAttachEmailState();
 }
 
@@ -551,28 +568,36 @@ function buildAttachEmailSearchFilter(type, search) {
     return "";
   }
 
+  // Contacts/Perf expects each condition to be wrapped once before it is
+  // combined with the other conditions. This deliberately matches the ATS
+  // Contacts page's working filter shape. Passing the unwrapped shape makes
+  // the API silently ignore the filter, leaving every record visible.
+  const contains = (field) => [[field, "contains", value]];
+
   if (type === "candidates") {
     return JSON.stringify([
-      ["CandidateData.FirstName", "contains", value],
+      contains("CandidateData.FirstName"),
       "or",
-      ["CandidateData.LastName", "contains", value],
+      contains("CandidateData.LastName"),
       "or",
-      ["CandidateData.Contact.Email1", "contains", value],
+      contains("CandidateData.Contact.Email1"),
       "or",
-      ["CandidateData.JobTitle", "contains", value],
+      contains("CandidateData.JobTitle"),
       "or",
-      ["CandidateData.CurrentLocation", "contains", value]
+      contains("CandidateData.CurrentLocation")
     ]);
   }
 
   return JSON.stringify([
-    ["ContactData.Name", "contains", value],
+    contains("ContactData.FirstName"),
     "or",
-    ["ContactData.Contact.Email1", "contains", value],
+    contains("ContactData.LastName"),
     "or",
-    ["ContactData.CompanyName", "contains", value],
+    contains("ContactData.Contact.Email1"),
     "or",
-    ["ContactData.JobTitle", "contains", value]
+    contains("ContactData.CompanyName"),
+    "or",
+    contains("ContactData.JobTitle")
   ]);
 }
 
@@ -614,7 +639,7 @@ function normalizeAttachEmailCandidate(record) {
 
 async function fetchAttachEmailRecords(type, options = {}) {
   const page = Math.max(0, Number(options.page || 0));
-  const search = String(options.search ?? state.attachEmail.search ?? "").trim();
+  const search = String(options.search ?? state.attachEmail.appliedSearch ?? "").trim();
   const skip = page * ATTACH_EMAIL_PAGE_SIZE;
   const filter = buildAttachEmailSearchFilter(type, search);
   const query = new URLSearchParams({
@@ -652,8 +677,10 @@ async function fetchAttachEmailRecords(type, options = {}) {
 }
 
 async function loadAttachEmailRecords(options = {}) {
+  const loadSequence = ++attachEmailLoadSequence;
   const loadContacts = options.loadContacts !== false;
   const loadCandidates = options.loadCandidates !== false;
+  const search = String(options.search ?? state.attachEmail.appliedSearch ?? "");
   const contactsPage = Math.max(0, Number(options.contactsPage ?? state.attachEmail.contactsPage));
   const candidatesPage = Math.max(
     0,
@@ -674,7 +701,7 @@ async function loadAttachEmailRecords(options = {}) {
       tasks.push(
         fetchAttachEmailRecords("contacts", {
           page: contactsPage,
-          search: state.attachEmail.search
+          search
         }).then((result) => ({
           type: "contacts",
           result
@@ -686,7 +713,7 @@ async function loadAttachEmailRecords(options = {}) {
       tasks.push(
         fetchAttachEmailRecords("candidates", {
           page: candidatesPage,
-          search: state.attachEmail.search
+          search
         }).then((result) => ({
           type: "candidates",
           result
@@ -695,6 +722,10 @@ async function loadAttachEmailRecords(options = {}) {
     }
 
     const results = await Promise.allSettled(tasks);
+
+    if (loadSequence !== attachEmailLoadSequence) {
+      return;
+    }
 
     const errors = [];
 
@@ -727,10 +758,39 @@ async function loadAttachEmailRecords(options = {}) {
     state.attachEmail.error = errors[0] || "";
     render();
   } catch (error) {
+    if (loadSequence !== attachEmailLoadSequence) {
+      return;
+    }
+
     state.attachEmail.loading = false;
     state.attachEmail.error =
       error instanceof Error ? error.message : "Unable to load TrackTalents records.";
     render();
+  }
+}
+
+function submitAttachEmailSearch() {
+  state.attachEmail.appliedSearch = state.attachEmail.search.trim();
+  state.attachEmail.contactsPage = 0;
+  state.attachEmail.candidatesPage = 0;
+
+  void loadAttachEmailRecords({
+    loadContacts: true,
+    loadCandidates: true,
+    contactsPage: 0,
+    candidatesPage: 0,
+    search: state.attachEmail.appliedSearch
+  });
+}
+
+function updateAttachEmailSearch(value) {
+  const search = String(value || "");
+  state.attachEmail.search = search;
+
+  // Clear controls do not require Enter. As soon as the input becomes empty,
+  // reset the server filter and return both lists to their first page.
+  if (!search.trim() && state.attachEmail.appliedSearch) {
+    submitAttachEmailSearch();
   }
 }
 
@@ -1035,13 +1095,26 @@ function renderAttachEmailPanel() {
         </div>
 
         <div class="attach-email-toolbar">
-          <input
-            id="attach-email-search"
-            class="attach-email-search"
-            type="search"
-            placeholder="${escapeAttribute(searchPlaceholder)}"
-            value="${escapeAttribute(state.attachEmail.search)}"
-          />
+          <div class="attach-email-search-wrap">
+            <button
+              id="attach-email-search-button"
+              class="attach-email-search-button"
+              type="button"
+              aria-label="Search TrackTalents records"
+            >
+              <svg class="attach-email-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+                <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+            </button>
+            <input
+              id="attach-email-search"
+              class="attach-email-search"
+              type="search"
+              placeholder="${escapeAttribute(searchPlaceholder)}"
+              value="${escapeAttribute(state.attachEmail.search)}"
+            />
+          </div>
         </div>
 
         ${renderAttachEmailTable()}
@@ -1094,6 +1167,11 @@ function renderAttachEmailPanel() {
 }
 
 function handleActionRequest(actionId) {
+  // Capture the currently open Outlook item synchronously on the user's
+  // action click. This prevents a previous message's sender from being used
+  // as the contact for Submit Resume To Contact.
+  readCurrentItem();
+
   if (isAttachEmailAction(actionId)) {
     openAttachEmailPanel();
     return;
@@ -1104,7 +1182,15 @@ function handleActionRequest(actionId) {
     return;
   }
 
-  void handleDirectActionLaunch(actionId);
+  // The direct actions do asynchronous parsing and session creation before
+  // launching ATS. Reserve the browser window while this click still has a
+  // user gesture so Chrome does not replace the eventual launch with
+  // about:blank#blocked.
+  const launchWindow =
+    state.auth?.accessToken && !isTokenExpired(state.auth)
+      ? reserveActionWindow()
+      : null;
+  void handleDirectActionLaunch(actionId, launchWindow);
 }
 
 function buildAttachmentBadgeMarkup(count) {
@@ -1255,7 +1341,13 @@ function renderImportModal() {
   const importDisabled = !hasAttachments || !selectedResume || state.importModal.submitting;
   const actionId = state.importModal.actionId;
   const actionLabel = actionLabelFromId(actionId);
-  const submitLabel = state.importModal.submitting ? "Importing..." : "Import";
+  const submitLabel = state.importModal.submitting
+    ? actionId === "source-resume-job"
+      ? "Preparing job selection..."
+      : "Preparing import..."
+    : actionId === "source-resume-job"
+      ? "Continue to Job Selection"
+      : "Import";
   const additionalDocumentsLabel = `${summary.documentCount} additional document${
     summary.documentCount === 1 ? "" : "s"
   }`;
@@ -1324,6 +1416,22 @@ function renderImportModal() {
         }
 
         ${
+          state.importModal.submitting
+            ? `<div class="action-processing" role="status" aria-live="polite">
+                <span class="action-processing-spinner" aria-hidden="true"></span>
+                <div>
+                  <strong>${
+                    actionId === "source-resume-job"
+                      ? "Preparing the resume for job assignment"
+                      : "Preparing your TrackTalents action"
+                  }</strong>
+                  <span>Please wait. This can take a few seconds.</span>
+                </div>
+              </div>`
+            : ""
+        }
+
+        ${
           hasAttachments
             ? `<div class="import-attachment-list">${state.importModal.attachments
                 .map(renderImportAttachmentRow)
@@ -1358,6 +1466,10 @@ function renderImportModal() {
 
 function render() {
   const root = getRoot();
+  const activeElement = document.activeElement;
+  const restoreAttachEmailSearchFocus = activeElement?.id === "attach-email-search";
+  const searchSelectionStart = restoreAttachEmailSearchFocus ? activeElement.selectionStart : null;
+  const searchSelectionEnd = restoreAttachEmailSearchFocus ? activeElement.selectionEnd : null;
   const authLabel = isAuthenticated() ? "Logout" : "Login";
   const authButtonId = isAuthenticated() ? "logout-button" : "open-login-button";
 
@@ -1404,22 +1516,42 @@ function render() {
   `;
 
   bindEvents();
+
+  if (restoreAttachEmailSearchFocus && state.attachEmail.open) {
+    const nextSearchInput = document.getElementById("attach-email-search");
+    if (nextSearchInput) {
+      nextSearchInput.focus({ preventScroll: true });
+
+      if (searchSelectionStart !== null && searchSelectionEnd !== null) {
+        const valueLength = nextSearchInput.value.length;
+        nextSearchInput.setSelectionRange(
+          Math.min(searchSelectionStart, valueLength),
+          Math.min(searchSelectionEnd, valueLength)
+        );
+      }
+    }
+  }
 }
 
 function renderActionButton(action) {
+  const isLaunching = state.actionLaunch.active && state.actionLaunch.actionId === action.id;
+  const actionsDisabled = state.actionLaunch.active;
+
   return `
     <button
-      class="action-button"
+      class="action-button ${isLaunching ? "action-button-loading" : ""}"
       type="button"
       data-action-id="${escapeAttribute(action.id)}"
       style="--action-watermark: url('${escapeAttribute(action.iconSrc)}');"
       aria-label="${escapeAttribute(action.label)}"
+      aria-busy="${isLaunching ? "true" : "false"}"
+      ${actionsDisabled ? "disabled" : ""}
     >
       <span class="action-icon" aria-hidden="true">
         <img src="${escapeAttribute(action.iconSrc)}" alt="" class="action-icon-image" />
       </span>
       <span class="action-copy">
-        <strong>${escapeHtml(action.label)}</strong>
+        <strong>${escapeHtml(isLaunching ? "Opening..." : action.label)}</strong>
       </span>
     </button>
   `;
@@ -1535,17 +1667,27 @@ function bindEvents() {
   const attachEmailSearch = document.getElementById("attach-email-search");
   if (attachEmailSearch) {
     attachEmailSearch.addEventListener("input", (event) => {
-      state.attachEmail.search = event.target.value;
-      state.attachEmail.contactsPage = 0;
-      state.attachEmail.candidatesPage = 0;
-      void loadAttachEmailRecords({
-        loadContacts: true,
-        loadCandidates: true,
-        contactsPage: 0,
-        candidatesPage: 0,
-        renderLoading: false
-      });
+      updateAttachEmailSearch(event.target.value);
     });
+
+    // Chrome also dispatches this native event for the X clear control.
+    attachEmailSearch.addEventListener("search", (event) => {
+      updateAttachEmailSearch(event.target.value);
+    });
+
+    attachEmailSearch.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      submitAttachEmailSearch();
+    });
+  }
+
+  const attachEmailSearchButton = document.getElementById("attach-email-search-button");
+  if (attachEmailSearchButton) {
+    attachEmailSearchButton.addEventListener("click", submitAttachEmailSearch);
   }
 
   document.querySelectorAll("[data-attach-email-tab]").forEach((button) => {
@@ -2151,34 +2293,98 @@ function normalizePayType(value) {
   return "";
 }
 
+function phoneWithExtension(phoneNumber, extension) {
+  const phone = toPlainString(phoneNumber);
+  const extensionDigits = toPlainString(extension).replace(/\D/g, "");
+
+  if (!phone || !extensionDigits || /(?:\bext\.?|\bx)\s*\d+\s*$/i.test(phone)) {
+    return phone;
+  }
+
+  return `${phone} x${extensionDigits}`;
+}
+
+function extractLocationParts(data = {}) {
+  const location = data.location || data.current_location || data.currentLocation || "";
+  if (location && typeof location === "object") {
+    return {
+      streetAddress: firstNonEmpty(location.street_address, location.streetAddress, location.StreetAddress, data.street_address, ""),
+      city: firstNonEmpty(location.city, location.City, data.city, ""),
+      state: firstNonEmpty(location.state, location.State, location.region, data.state, ""),
+      postalCode: firstNonEmpty(location.postal_code, location.postalCode, location.PostalCode, data.postal_code, ""),
+      country: firstNonEmpty(location.country, location.Country, data.country, "")
+    };
+  }
+
+  const text = toPlainString(location);
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+  return {
+    streetAddress: toPlainString(data.street_address),
+    city: firstNonEmpty(data.city, parts[0], ""),
+    state: firstNonEmpty(data.state, parts.length > 1 ? parts[1] : "", ""),
+    postalCode: toPlainString(data.postal_code),
+    country: toPlainString(data.country)
+  };
+}
+
+function formatLocation(data = {}) {
+  const explicitLocation = toPlainString(data.location || data.current_location || data.currentLocation);
+  if (explicitLocation) return explicitLocation;
+
+  const location = extractLocationParts(data);
+  return [location.city, location.state, location.country].filter(Boolean).join(", ");
+}
+
 function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
   const data = parserResult?.structured_data || {};
 
   if (actionId === "add-contact" || actionId === "submit-resume-contact") {
     const nameParts = splitFullName(data.full_name);
+    // Providers can label the same contact details differently. Preserve the
+    // canonical fields while accepting those equivalent values from a parser.
+    const cellNumber = firstNonEmpty(
+      data.cell_number, data.mobile_number, data.mobile, data.phone_number, data.phone, ""
+    );
+    const workNumber = firstNonEmpty(
+      data.work_number, data.work_phone, data.office_phone, data.office_number, ""
+    );
+    const directNumber = firstNonEmpty(data.direct_number, data.direct_phone, data.phone_direct, "");
+    const companyName = firstNonEmpty(
+      data.company_name, data.company, data.companyName, data.employer, data.organization, ""
+    );
+    const location = extractLocationParts(data);
 
     return {
       FirstName: data.first_name || nameParts.firstName,
       LastName: data.last_name || nameParts.lastName,
       JobTitle: data.job_title || "",
-      CompanyName: data.company_name || "",
+      CompanyName: companyName,
       Notes: data.notes || "",
       Contact: {
         Email1: data.email || "",
-        CellNumber: data.cell_number || "",
-        WorkNumber: data.work_number || "",
-        DirectNumber: "",
-        StreetAddress: data.street_address || "",
-        City: data.city || "",
-        State: data.state || "",
-        PostalCode: data.postal_code || "",
-        Country: data.country || "USA"
+        CellNumber: phoneWithExtension(
+          cellNumber,
+          firstNonEmpty(data.cell_extension, data.mobile_extension, data.phone_extension, data.extension, "")
+        ),
+        WorkNumber: phoneWithExtension(
+          workNumber,
+          firstNonEmpty(data.work_extension, data.office_extension, "")
+        ),
+        DirectNumber: phoneWithExtension(
+          directNumber,
+          firstNonEmpty(data.direct_extension, "")
+        ),
+        StreetAddress: location.streetAddress,
+        City: location.city,
+        State: location.state,
+        PostalCode: location.postalCode,
+        Country: location.country || "USA"
       },
-      StreetAddress: data.street_address || "",
-      City: data.city || "",
-      State: data.state || "",
-      PostalCode: data.postal_code || "",
-      Country: data.country || "USA",
+      StreetAddress: location.streetAddress,
+      City: location.city,
+      State: location.state,
+      PostalCode: location.postalCode,
+      Country: location.country || "USA",
       EmailParserData: data,
       EmailParserConfidence: parserResult?.confidence_summary || ""
     };
@@ -2194,7 +2400,7 @@ function buildParsedResumeDataFromEmailParser(actionId, parserResult) {
     JobTitle: data.job_title || "",
     CompanyName: data.company_name || "",
     ClientName: data.company_name || "",
-    Location: data.location || "",
+    Location: formatLocation(data),
     WorkMode: data.work_mode || "",
     EmploymentType: data.employment_type || "",
     ExperienceRequired: data.experience_required || "",
@@ -2354,6 +2560,11 @@ function buildEmailAddinRecordRequest(type, options = {}) {
         Name: recipient.displayName,
         Email: recipient.email
       })),
+      Cc: normalizeRecipientList(options.ccRecipients ?? item.cc).map((recipient) => ({
+        Name: recipient.displayName,
+        Email: recipient.email
+      })),
+      SentAt: String(options.sentAt ?? item.sentAt ?? ""),
       ContextId: contextId,
       MessageId: messageId
     }
@@ -2500,10 +2711,33 @@ function buildInlineOutlookImportFallback(outlookImport) {
     return null;
   }
 
+  const stripDocumentContent = (document) => {
+    if (!document || typeof document !== "object") {
+      return document;
+    }
+
+    const { Content, content, AttachmentBinary, attachmentBinary, ...metadata } = document;
+    return metadata;
+  };
+
+  const emailAddinRecord = outlookImport.emailAddinRecord && typeof outlookImport.emailAddinRecord === "object"
+    ? {
+        ...outlookImport.emailAddinRecord,
+        Documents: Array.isArray(outlookImport.emailAddinRecord.Documents)
+          ? outlookImport.emailAddinRecord.Documents.map(stripDocumentContent)
+          : outlookImport.emailAddinRecord.Documents
+      }
+    : outlookImport.emailAddinRecord || null;
+
   return {
     ...outlookImport,
-    // Raw attachment binaries can make the bridge URL too large. The session keeps the full payload.
+    // Keep this URL fallback small. The import session always contains the full
+    // parsed resume and document binaries used by the ATS.
     attachments: [],
+    documents: Array.isArray(outlookImport.documents)
+      ? outlookImport.documents.map(stripDocumentContent)
+      : [],
+    emailAddinRecord,
     selectedResume: outlookImport.selectedResume || null
   };
 }
@@ -2537,7 +2771,54 @@ function buildAuthBridgeUrl(actionId, bridgeData = {}) {
   return `${buildAbsoluteAppUrl(state.config.authBridgePath)}#${hash.toString()}`;
 }
 
-function safeOpenWindow(url) {
+function reserveActionWindow() {
+  try {
+    const launchWindow = window.open("about:blank", "_blank");
+
+    if (launchWindow && !launchWindow.closed) {
+      launchWindow.document.title = "TrackTalents";
+      launchWindow.document.body.innerHTML = `
+        <main style="min-height:100vh;display:grid;place-items:center;font-family:Arial,sans-serif;background:#f8f7ff;color:#20263a">
+          <div style="text-align:center;padding:32px">
+            <div style="width:38px;height:38px;margin:0 auto 18px;border:4px solid #ddd6fe;border-top-color:#7c3aed;border-radius:50%;animation:tracktalents-spin .8s linear infinite"></div>
+            <h1 style="font-size:20px;margin:0 0 8px">Preparing your TrackTalents action</h1>
+            <p style="font-size:14px;margin:0;color:#667085">Please keep this tab open while the attachment is processed.</p>
+          </div>
+          <style>@keyframes tracktalents-spin{to{transform:rotate(360deg)}}</style>
+        </main>`;
+    }
+
+    return launchWindow;
+  } catch {
+    return null;
+  }
+}
+
+function closeReservedActionWindow(launchWindow) {
+  if (!launchWindow || launchWindow.closed) return;
+
+  try {
+    launchWindow.close();
+  } catch {
+    // The original action can still surface its error in the task pane.
+  }
+}
+
+function safeOpenWindow(url, launchWindow = null) {
+  if (launchWindow && !launchWindow.closed) {
+    try {
+      launchWindow.location.replace(url);
+      // Do not touch `opener` after navigation. The destination is normally
+      // a different origin from the Outlook task pane (for example,
+      // https://localhost:3201 -> http://localhost:3000). Accessing it then
+      // can throw a cross-origin error, which used to close the reserved
+      // window and leave the user with no ATS handoff at all.
+      return;
+    } catch {
+      closeReservedActionWindow(launchWindow);
+    }
+  }
+
   if (window.Office?.context?.ui?.openBrowserWindow) {
     Office.context.ui.openBrowserWindow(url);
     return;
@@ -2548,33 +2829,51 @@ function safeOpenWindow(url) {
 
 function launchAction(actionId, options = {}) {
   try {
+    const hasImportSession = Boolean(
+      String(options.outlookImportSessionId || "").trim() &&
+      String(options.outlookImportApiHost || "").trim()
+    );
     const url = buildAuthBridgeUrl(actionId, {
-      outlookCandidateImport: options.outlookCandidateImport,
+      // The complete import is already stored behind this short-lived session.
+      // Repeating parsed resume/email data in the hash can make the URL large
+      // enough that Chrome leaves the reserved action tab on about:blank.
+      // Keep the inline data only for legacy flows that have no session.
+      outlookCandidateImport: hasImportSession ? null : options.outlookCandidateImport,
       outlookImportSessionId: options.outlookImportSessionId,
       outlookImportApiHost: options.outlookImportApiHost,
-      emailAddinRecord: options.emailAddinRecord,
-      selectedResume: options.selectedResume
+      emailAddinRecord: hasImportSession ? null : options.emailAddinRecord,
+      selectedResume: hasImportSession ? null : options.selectedResume
     });
-    safeOpenWindow(url);
+    safeOpenWindow(url, options.launchWindow);
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: false,
+      actionId: null
+    };
     state.showLoginModal = false;
     closeAttachEmailPanel();
     closeImportModal();
     render();
   } catch (error) {
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: false,
+      actionId: null
+    };
     state.loginError = error instanceof Error ? error.message : "Unable to open TrackTalents.";
     render();
   }
 }
 
-async function handleDirectActionLaunch(actionId) {
+async function handleDirectActionLaunch(actionId, launchWindow = null) {
   if (isTokenExpired(state.auth)) {
+    closeReservedActionWindow(launchWindow);
     openSessionExpiredNotice(actionId);
     return;
   }
 
   if (!state.auth?.accessToken) {
+    closeReservedActionWindow(launchWindow);
     state.pendingActionId = actionId;
     state.showLoginModal = true;
     state.loginError = "";
@@ -2583,7 +2882,14 @@ async function handleDirectActionLaunch(actionId) {
   }
 
   try {
+    // ItemChanged is not guaranteed to have completed before a user presses
+    // an action. Refresh once more immediately before building the handoff.
+    readCurrentItem();
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: true,
+      actionId
+    };
     render();
 
     const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
@@ -2676,14 +2982,20 @@ async function handleDirectActionLaunch(actionId) {
     launchAction(actionId, {
       outlookCandidateImport: buildInlineOutlookImportFallback(outlookActionImport),
       outlookImportSessionId: importSession.sessionId,
-      outlookImportApiHost: importSession.apiHost
+      outlookImportApiHost: importSession.apiHost,
+      launchWindow
     });
   } catch (error) {
+    closeReservedActionWindow(launchWindow);
     logEmailAddinRecordDebug("Submit error", {
       actionId,
       message: error instanceof Error ? error.message : String(error)
     });
     state.launchMessage = "";
+    state.actionLaunch = {
+      active: false,
+      actionId: null
+    };
     state.loginError =
       error instanceof Error ? error.message : "Unable to open the TrackTalents action.";
     render();
@@ -2691,26 +3003,53 @@ async function handleDirectActionLaunch(actionId) {
 }
 
 async function resolveAttachmentForImport(attachment) {
-  if (attachment?.content) {
-    return attachment;
+  const currentAttachment = resolveCurrentOfficeAttachment(attachment);
+
+  if (currentAttachment?.content) {
+    return currentAttachment;
   }
 
   if (state.currentItem?.mode === "preview") {
     return {
-      ...attachment,
+      ...currentAttachment,
       contentFormat: "base64",
       content: utf8TextToBase64(
-        attachment.previewText || `${attachment.name}\nTrackTalents preview attachment content`
+        currentAttachment.previewText ||
+          `${currentAttachment.name}\nTrackTalents preview attachment content`
       )
     };
   }
 
-  const contentResult = await readOfficeAttachmentContent(attachment.id);
+  const contentResult = await readOfficeAttachmentContent(
+    currentAttachment.id,
+    currentAttachment.name
+  );
   return {
-    ...attachment,
+    ...currentAttachment,
     contentFormat: normalizeAttachmentContentFormat(contentResult.format),
     content: String(contentResult.content || "")
   };
+}
+
+function resolveCurrentOfficeAttachment(attachment) {
+  const fallback = attachment || {};
+  const liveAttachments = getCurrentOfficeAttachmentsSnapshot();
+  const attachmentId = String(fallback.id || "");
+  const attachmentName = String(fallback.name || "");
+  const attachmentSize = Number(fallback.size || 0);
+
+  // Match by Office attachment ID first. Name and size provide a safe fallback
+  // when Outlook refreshes an attachment ID after the task pane is opened.
+  return (
+    liveAttachments.find((item) => attachmentId && item.id === attachmentId) ||
+    liveAttachments.find(
+      (item) =>
+        attachmentName &&
+        item.name === attachmentName &&
+        (!attachmentSize || !item.size || item.size === attachmentSize)
+    ) ||
+    fallback
+  );
 }
 
 async function prepareEmailAddinDocuments(attachments) {
@@ -2719,9 +3058,18 @@ async function prepareEmailAddinDocuments(attachments) {
     return [];
   }
 
-  const resolvedAttachments = await Promise.all(
+  const results = await Promise.allSettled(
     documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
   );
+  const resolvedAttachments = results
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  results
+    .filter((result) => result.status === "rejected")
+    .forEach((result) => {
+      console.warn("Unable to read an optional Outlook attachment.", result.reason);
+    });
 
   return prepareImportDocuments(resolvedAttachments);
 }
@@ -2737,7 +3085,25 @@ function utf8TextToBase64(value) {
   return btoa(binary);
 }
 
-function readOfficeAttachmentContent(attachmentId) {
+async function readOfficeAttachmentContent(attachmentId, attachmentName = "attachment") {
+  const attempts = 2;
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await readOfficeAttachmentContentOnce(attachmentId, attachmentName);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  throw lastError || new Error(`TrackTalents could not read "${attachmentName}" from Outlook.`);
+}
+
+function readOfficeAttachmentContentOnce(attachmentId, attachmentName) {
   return new Promise((resolve, reject) => {
     const item = window.Office?.context?.mailbox?.item;
     if (!item?.getAttachmentContentAsync) {
@@ -2749,10 +3115,14 @@ function readOfficeAttachmentContent(attachmentId) {
 
     item.getAttachmentContentAsync(attachmentId, (result) => {
       if (result.status !== Office.AsyncResultStatus.Succeeded) {
+        const detail = String(
+          result.error?.message || result.error?.name || result.error?.code || ""
+        ).trim();
         reject(
           new Error(
-            result.error?.message ||
-              "TrackTalents could not read one of the selected Outlook attachments."
+            detail
+              ? `TrackTalents could not read "${attachmentName}" from Outlook: ${detail}`
+              : `TrackTalents could not read "${attachmentName}" from Outlook.`
           )
         );
         return;
@@ -2765,6 +3135,10 @@ function readOfficeAttachmentContent(attachmentId) {
 
 async function handleImportSubmit() {
   const actionId = state.importModal.actionId || "add-candidate";
+  // Keep the message metadata in sync with the attachment picker. In
+  // particular, Submit Resume To Contact must use the sender from the email
+  // that is currently open, never the previous Outlook item.
+  readCurrentItem();
   const summary = getImportSummary();
   const selectedResume = summary.selectedResume;
   const documentAttachments = state.importModal.attachments.filter(
@@ -2791,12 +3165,35 @@ async function handleImportSubmit() {
     return;
   }
 
+  // Office provides its own browser-window API, which can safely be called
+  // after the asynchronous import work completes. In the standalone/local
+  // preview, reserve a tab during this Import click so the browser does not
+  // block the final ATS navigation as an unsolicited popup.
+  const canUseOfficeBrowserWindow =
+    typeof window.Office?.context?.ui?.openBrowserWindow === "function";
+  const launchWindow = canUseOfficeBrowserWindow ? null : reserveActionWindow();
+
   state.importModal.submitting = true;
   state.importModal.error = "";
   render();
 
   try {
     const emailBody = await getCurrentEmailBodyForStorage({ requireHtml: true });
+    const contactParserTask = actionId === "submit-resume-contact"
+      ? parseCurrentEmailForAction(actionId)
+          .then((result) => ({
+            result,
+            warnings: Array.isArray(result?.warnings) ? result.warnings : []
+          }))
+          .catch((error) => ({
+            result: null,
+            warnings: [
+              error instanceof Error
+                ? error.message
+                : "Unable to parse the Outlook contact details."
+            ]
+          }))
+      : Promise.resolve({ result: null, warnings: [] });
     logEmailAddinRecordDebug("Submit start", {
       actionId,
       itemId: state.currentItem?.itemId || "",
@@ -2806,7 +3203,7 @@ async function handleImportSubmit() {
     });
 
     const selectedResumeTask = resolveAttachmentForImport(selectedResume);
-    const resolvedDocumentAttachmentsTask = Promise.all(
+    const resolvedDocumentAttachmentsTask = Promise.allSettled(
       documentAttachments.map((attachment) => resolveAttachmentForImport(attachment))
     );
     const resolvedSelectedResume = await selectedResumeTask;
@@ -2817,10 +3214,20 @@ async function handleImportSubmit() {
       step: "parse-resume"
     });
 
-    const [parsedResumeData, resolvedDocumentAttachments] = await Promise.all([
+    const [parsedResumeData, documentAttachmentResults, contactParser] = await Promise.all([
       parseResumeAttachment(resolvedSelectedResume),
-      resolvedDocumentAttachmentsTask
+      resolvedDocumentAttachmentsTask,
+      contactParserTask
     ]);
+    const resolvedDocumentAttachments = documentAttachmentResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    const unreadableDocuments = documentAttachmentResults.filter(
+      (result) => result.status === "rejected"
+    );
+    unreadableDocuments.forEach((result) => {
+      console.warn("Unable to read an optional Outlook attachment.", result.reason);
+    });
     logEmailAddinRecordDebug("Resume parsed", {
       fileName: resolvedSelectedResume?.name || "",
       hasParsedData: Boolean(parsedResumeData),
@@ -2870,7 +3277,18 @@ async function handleImportSubmit() {
         _id: recordId || payload?._id || "",
         Type: String(payload?.Type || getEmailAddinRecordType(actionId))
       },
-      selectedResume: resumePreview
+      selectedResume: resumePreview,
+      emailParserResult: contactParser.result,
+      warnings: [
+        ...(unreadableDocuments.length
+          ? [
+            `${unreadableDocuments.length} additional Outlook attachment${
+              unreadableDocuments.length === 1 ? " was" : "s were"
+            } skipped because Outlook could not read it.`
+          ]
+          : []),
+        ...contactParser.warnings
+      ]
     });
     const importSession = await createOutlookImportSession(outlookCandidateImport);
     logEmailAddinRecordDebug("Outlook import session created", {
@@ -2881,9 +3299,13 @@ async function handleImportSubmit() {
     launchAction(actionId, {
       outlookCandidateImport: buildInlineOutlookImportFallback(outlookCandidateImport),
       outlookImportSessionId: importSession.sessionId,
-      outlookImportApiHost: importSession.apiHost
+      outlookImportApiHost: importSession.apiHost,
+      emailAddinRecord: outlookCandidateImport.emailAddinRecord,
+      selectedResume: outlookCandidateImport.selectedResume,
+      launchWindow
     });
   } catch (error) {
+    closeReservedActionWindow(launchWindow);
     logEmailAddinRecordDebug("Submit error", {
       message: error instanceof Error ? error.message : String(error)
     });
@@ -2934,6 +3356,7 @@ function setItemStateFromOffice(item) {
     : "Unavailable in this mode";
   const toRecipients = normalizeRecipientList(item.to);
   const replyToRecipients = normalizeRecipientList(item.replyTo);
+  const ccRecipients = normalizeRecipientList(item.cc);
 
   state.currentItem = {
     itemId: toPlainString(item.itemId) || toPlainString(item.internetMessageId),
@@ -2947,6 +3370,8 @@ function setItemStateFromOffice(item) {
       : { displayName: "", email: "" },
     replyTo: replyToRecipients,
     to: toRecipients,
+    cc: ccRecipients,
+    sentAt: toPlainString(item.dateTimeCreated || item.dateTimeModified),
     fromDisplay,
     toCount: toRecipients.length,
     attachments,
@@ -2959,9 +3384,14 @@ function setItemStateFromOffice(item) {
     mode: "outlook"
   };
 
+  const itemId = state.currentItem.itemId;
+
   if (item.body?.getAsync) {
     item.body.getAsync(Office.CoercionType.Text, (result) => {
-      if (result.status === Office.AsyncResultStatus.Succeeded && state.currentItem) {
+      if (
+        result.status === Office.AsyncResultStatus.Succeeded &&
+        state.currentItem?.itemId === itemId
+      ) {
         state.currentItem.bodyPreview = String(result.value || "")
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n")
@@ -2971,7 +3401,10 @@ function setItemStateFromOffice(item) {
     });
 
     item.body.getAsync(Office.CoercionType.Html, (result) => {
-      if (result.status === Office.AsyncResultStatus.Succeeded && state.currentItem) {
+      if (
+        result.status === Office.AsyncResultStatus.Succeeded &&
+        state.currentItem?.itemId === itemId
+      ) {
         state.currentItem.bodyHtml = String(result.value || "").trim();
         render();
       }

@@ -11,6 +11,7 @@ This repo now contains the current TrackTalents Outlook add-in foundation. The c
 
 ## What is included
 
+- `manifest/tracktalents-outlook-localhost.xml`
 - `manifest/tracktalents-outlook-development.xml`
 - `manifest/tracktalents-outlook-production.xml`
 - `public/taskpane.html`
@@ -88,7 +89,8 @@ Set `API_HOST` and `APP_HOST` in Railway only when a different production enviro
 
 ## Outlook manifests
 
-- `manifest/tracktalents-outlook-development.xml` is named **TrackTalents Outlook Dev** and targets `https://localhost:3201`. Use it only while the local add-in server is running for development/testing.
+- `manifest/tracktalents-outlook-localhost.xml` is named **TrackTalents Outlook Local** and targets `https://localhost:3201`. Use it only while the local add-in server is running on your computer.
+- `manifest/tracktalents-outlook-development.xml` is named **TrackTalents Outlook Development** and targets the shared Railway development host. Use this file when testing with other people; it does not require localhost.
 - `manifest/tracktalents-outlook-production.xml` is named **TrackTalents Outlook** and targets the deployed Railway add-in host. Use it for production sideloading/deployment.
 
 The manifests use distinct add-in IDs, so Outlook can install the development and production add-ins side by side. The `/manifest.xml` endpoint serves the development manifest locally and the production manifest when hosted on Railway.
@@ -97,7 +99,8 @@ The manifests use distinct add-in IDs, so Outlook can install the development an
 
 Use the appropriate manifest file:
 
-- development/testing: `manifest/tracktalents-outlook-development.xml`
+- local testing on your computer: `manifest/tracktalents-outlook-localhost.xml`
+- shared development/testing: `manifest/tracktalents-outlook-development.xml`
 - production: `manifest/tracktalents-outlook-production.xml`
 
 For Outlook on the web or new Outlook, go to:

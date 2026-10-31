@@ -9,14 +9,17 @@ const devCerts = require("office-addin-dev-certs");
 
 const HTTPS_PORT = Number(process.env.PORT || 3201);
 const HTTP_PREVIEW_PORT = Number(process.env.PREVIEW_PORT || 3202);
-const IS_PRODUCTION_HOSTING =
-  process.env.NODE_ENV === "production" ||
-  Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
-const HOST = process.env.HOST || (IS_PRODUCTION_HOSTING ? "0.0.0.0" : "::");
 const DEVELOPMENT_API_HOST = "https://testapi.tracktalents.com/api/";
 const PRODUCTION_API_HOST = "https://api.tracktalents.com/api/";
 const DEVELOPMENT_APP_HOST = "http://localhost:3000";
 const PRODUCTION_APP_HOST = "https://www.tracktalents.com";
+const IS_RAILWAY_HOSTING = Boolean(
+  process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN
+);
+const IS_PRODUCTION_HOSTING = process.env.RAILWAY_ENVIRONMENT === "production";
+const IS_DEVELOPMENT_HOSTING =
+  IS_RAILWAY_HOSTING && !IS_PRODUCTION_HOSTING;
+const HOST = process.env.HOST || (IS_RAILWAY_HOSTING ? "0.0.0.0" : "::");
 const API_HOST =
   process.env.API_HOST || (IS_PRODUCTION_HOSTING ? PRODUCTION_API_HOST : DEVELOPMENT_API_HOST);
 const APP_HOST =
@@ -53,12 +56,27 @@ app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
 app.get("/manifest.xml", (req, res) => {
   const manifestFile = IS_PRODUCTION_HOSTING
     ? "tracktalents-outlook-production.xml"
-    : "tracktalents-outlook-development.xml";
+    : IS_DEVELOPMENT_HOSTING
+      ? "tracktalents-outlook-development.xml"
+      : "tracktalents-outlook-localhost.xml";
   const manifestPath = path.join(__dirname, "..", "manifest", manifestFile);
   const manifestXml = fs.readFileSync(manifestPath, "utf8");
   const publicUrl = getAddinPublicUrl(req);
+  const manifestHosts = [
+    "https://localhost:3201",
+    "https://tracktalents-outlook-extension-development.up.railway.app",
+    "https://tracktalents-outlook-extension-production.up.railway.app",
+  ];
+  const publicManifestXml = manifestHosts.reduce(
+    (xml, host) => xml.replaceAll(host, publicUrl),
+    manifestXml
+  );
 
-  res.type("application/xml").send(manifestXml.replaceAll("https://localhost:3201", publicUrl));
+  // Outlook can cache a custom add-in manifest for a long time. Always serve
+  // the current environment URL and prevent an old Railway domain from being
+  // reused after a development deployment or domain migration.
+  res.set("Cache-Control", "no-store, max-age=0");
+  res.type("application/xml").send(publicManifestXml);
 });
 
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -68,6 +86,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     host: HOST,
     productionHosting: IS_PRODUCTION_HOSTING,
+    developmentHosting: IS_DEVELOPMENT_HOSTING,
     httpsPort: HTTPS_PORT,
     httpPreviewPort: HTTP_PREVIEW_PORT,
     apiHost: API_HOST,
@@ -234,6 +253,24 @@ app.post("/api/EmailAddinRecord", async (req, res) => {
 
     const data = await readApiResponse(response);
     if (!response.ok) {
+      // The production API currently does not expose EmailAddinRecord. The
+      // Outlook handoff itself is still complete without it because the import
+      // session carries the email context and uploaded documents. Treat only
+      // that known missing-controller response as an optional feature, while
+      // preserving all other API failures for the user to correct.
+      if (isEmailAddinRecordControllerUnavailable(response.status, data)) {
+        const localOnlyRecord = normalizeEmailAddinRecord({
+          ...localRecordPayload,
+          EmailAddinRecordUnavailable: true
+        });
+        recordEmailAddinDebugEvent("EmailAddinRecord unavailable; continuing import", {
+          type,
+          status: response.status
+        });
+        res.json(localOnlyRecord);
+        return;
+      }
+
       res.status(response.status).json({
         message: data?.message || "Unable to create the email add-in record.",
         details: data
@@ -1021,11 +1058,28 @@ async function fetchAttachEmailCandidates(accessToken, query) {
   if (search) {
     params.set("CandidateData.FirstName", search);
     params.set("CandidateData.LastName", search);
+    params.set("CandidateData.Contact.CellNumber", search);
+    params.set("CandidateData.Contact.WorkNumber", search);
     params.set("CandidateData.Contact.Email1", search);
     params.set("CandidateData.Contact.Email2", search);
     params.set("CandidateData.JobTitle", search);
+    params.set("CandidateData.JobCategory", search);
+    params.set("CandidateData.TotalExperience", search);
+    params.set("CandidateData.EducationLevel", search);
+    params.set("CandidateData.Rate", search);
+    params.set("CandidateData.WorkAuthorization", search);
     params.set("CandidateData.CurrentLocation", search);
     params.set("CandidateData.CandidateStatus", "");
+    params.set("CandidateData.NoticePeriod", search);
+    params.set("CandidateData.Source", search);
+    params.set("CandidateData.UserId", search);
+    params.set("CandidateData.Owners", search);
+    params.set("CandidateData.SkypeID", search);
+    params.set("CandidateData.SSN", search);
+    params.set("CandidateData.EmployeeNumber", search);
+    params.set("CandidateData.PassportNumber", search);
+    params.set("CandidateData.Relocation", search);
+    params.set("CandidateData.CandidateId", search);
   }
 
   const response = await fetch(new URL("v1/Candidates/Elastic", API_HOST), {
@@ -1117,7 +1171,13 @@ function sanitizeEmailAddinData(emailData) {
         : "",
     From: sanitizeSingleRecipient(emailData?.From ?? emailData?.from),
     ReplyTo: sanitizeSingleRecipient(emailData?.ReplyTo ?? emailData?.replyTo),
-    To: sanitizeRecipientList(emailData?.To ?? emailData?.to)
+    To: sanitizeRecipientList(emailData?.To ?? emailData?.to),
+    Cc: sanitizeRecipientList(emailData?.Cc ?? emailData?.cc),
+    SentAt: typeof emailData?.SentAt === "string"
+      ? emailData.SentAt
+      : typeof emailData?.sentAt === "string"
+        ? emailData.sentAt
+        : ""
   };
 }
 
@@ -1143,6 +1203,26 @@ function recordEmailAddinDebugEvent(stage, details) {
     emailAddinRecordDebugEvents.shift();
   }
   console.log("[EmailAddinRecordDebug]", JSON.stringify(event));
+}
+
+function isEmailAddinRecordControllerUnavailable(status, data) {
+  if (status !== 404) {
+    return false;
+  }
+
+  const details = [
+    data?.Message,
+    data?.message,
+    data?.MessageDetail,
+    data?.messageDetail,
+    data?.error
+  ]
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  return details.includes("emailaddinrecord") &&
+    (details.includes("controller") || details.includes("resource"));
 }
 
 function buildEmailAddinRecordPayload(emailData, type, resumes, documents) {
@@ -1317,7 +1397,12 @@ function mergeEmailAddinEmailData(emailData, cachedEmailData) {
     To:
       Array.isArray(nextEmailData?.To) && nextEmailData.To.length > 0
         ? nextEmailData.To
-        : previousEmailData?.To
+        : previousEmailData?.To,
+    Cc:
+      Array.isArray(nextEmailData?.Cc) && nextEmailData.Cc.length > 0
+        ? nextEmailData.Cc
+        : previousEmailData?.Cc,
+    SentAt: pickFirstString(nextEmailData?.SentAt, previousEmailData?.SentAt)
   };
 }
 
@@ -1692,45 +1777,137 @@ async function uploadAttachmentToTrackTalents(attachment, accessToken) {
 
 async function parseResumeWithTrackTalents(attachment, accessToken) {
   const startTime = Date.now();
-  let response;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let response;
 
-  try {
-    response = await fetch(new URL("resume/parse", API_HOST), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      },
-      body: buildAttachmentFormData(attachment),
-      signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+    try {
+      response = await fetch(new URL("resume/parse", API_HOST), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: buildAttachmentFormData(attachment),
+        signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+      });
+    } catch (error) {
+      if (error?.name === "TimeoutError") {
+        throw new Error(
+          `TrackTalents did not finish parsing "${attachment?.name || "the selected resume"}" within ${
+            Math.round(API_REQUEST_TIMEOUT_MS / 1000)
+          } seconds.`
+        );
+      }
+
+      throw error;
+    }
+
+    const data = await readApiResponse(response);
+    const parsedResumeData = normalizeResumeParseResponse(data);
+    const hasCandidateIdentity = hasResumeIdentity(parsedResumeData);
+    console.log("Resume parse completed", {
+      fileName: attachment?.name || "",
+      durationMs: Date.now() - startTime,
+      attempt,
+      ok: response.ok,
+      status: response.status,
+      responseType: Array.isArray(data) ? "array" : typeof data,
+      responseKeys: getObjectKeys(data),
+      parsedResponseKeys: getObjectKeys(parsedResumeData),
+      hasCandidateIdentity
     });
-  } catch (error) {
-    if (error?.name === "TimeoutError") {
+
+    if (!response.ok) {
       throw new Error(
-        `TrackTalents did not finish parsing "${attachment?.name || "the selected resume"}" within ${
-          Math.round(API_REQUEST_TIMEOUT_MS / 1000)
-        } seconds.`
+        extractApiMessage(data) ||
+          `TrackTalents could not parse "${attachment?.name || "the selected resume"}".`
       );
     }
 
-    throw error;
+    if (hasCandidateIdentity) {
+      return parsedResumeData;
+    }
   }
 
-  const data = await readApiResponse(response);
-  console.log("Resume parse completed", {
-    fileName: attachment?.name || "",
-    durationMs: Date.now() - startTime,
-    ok: response.ok,
-    status: response.status
-  });
+  throw new Error(
+    `TrackTalents returned no candidate details for "${attachment?.name || "the selected resume"}". Please try again.`
+  );
+}
 
-  if (!response.ok) {
-    throw new Error(
-      extractApiMessage(data) ||
-        `TrackTalents could not parse "${attachment?.name || "the selected resume"}".`
-    );
+function getObjectKeys(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.keys(value).slice(0, 20)
+    : [];
+}
+
+function hasResumeIdentity(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
   }
 
-  return data;
+  return Boolean(
+    String(value.FirstName || value.firstName || "").trim() ||
+      String(value.LastName || value.lastName || "").trim() ||
+      String(value.JobTitle || value.jobTitle || "").trim() ||
+      String(value.Contact?.Email1 || value.contact?.email1 || "").trim() ||
+      String(value.Contact?.CellNumber || value.contact?.cellNumber || "").trim() ||
+      (Array.isArray(value.WorkExperiences) && value.WorkExperiences.length > 0) ||
+      (Array.isArray(value.EducationDetails) && value.EducationDetails.length > 0)
+  );
+}
+
+function normalizeResumeParseResponse(value, depth = 0) {
+  if (depth > 8 || value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+      return value;
+    }
+
+    try {
+      return normalizeResumeParseResponse(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return value;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const normalized = normalizeResumeParseResponse(item, depth + 1);
+      if (hasResumeIdentity(normalized)) {
+        return normalized;
+      }
+    }
+    return value;
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  if (hasResumeIdentity(value)) {
+    return value;
+  }
+
+  // TrackTalents deployments have returned both direct candidate data and
+  // envelope responses (Data/data/Result/result). Keep the extension API
+  // stable by returning the candidate object in either case.
+  for (const key of [
+    "Data", "data", "Result", "result", "Resume", "resume",
+    "CandidateData", "candidateData", "Value", "value"
+  ]) {
+    const nested = value[key];
+    if (nested !== null && nested !== undefined) {
+      const normalized = normalizeResumeParseResponse(nested, depth + 1);
+      if (hasResumeIdentity(normalized)) {
+        return normalized;
+      }
+    }
+  }
+
+  return value;
 }
 
 async function readApiResponse(response) {
@@ -1923,12 +2100,21 @@ function buildPreviewCandidateImportPayload(selectedResume, attachments, emailCo
 }
 
 async function start() {
-  if (IS_PRODUCTION_HOSTING) {
+  // Railway terminates HTTPS at its public proxy. Local Outlook sideloading,
+  // however, still needs the Office development certificate on this machine.
+  if (IS_RAILWAY_HOSTING) {
     const httpServer = http.createServer(app);
 
     httpServer.listen(HTTPS_PORT, HOST, () => {
       console.log(`TrackTalents Outlook app running at http://${HOST}:${HTTPS_PORT}`);
       console.log(`Health check: http://${HOST}:${HTTPS_PORT}/health`);
+      console.log(
+        `Sideload manifest: manifest/${
+          IS_PRODUCTION_HOSTING
+            ? "tracktalents-outlook-production.xml"
+            : "tracktalents-outlook-development.xml"
+        }`
+      );
     });
     return;
   }
@@ -1958,7 +2144,9 @@ async function start() {
       `Sideload manifest: manifest/${
         IS_PRODUCTION_HOSTING
           ? "tracktalents-outlook-production.xml"
-          : "tracktalents-outlook-development.xml"
+          : IS_DEVELOPMENT_HOSTING
+            ? "tracktalents-outlook-development.xml"
+            : "tracktalents-outlook-localhost.xml"
       }`
     );
   });
