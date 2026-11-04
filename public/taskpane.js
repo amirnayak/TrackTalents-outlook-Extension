@@ -2003,7 +2003,7 @@ async function handleLoginSubmit(event) {
   }
 }
 
-function buildLaunchContext(action) {
+function buildLaunchContext(action, selectedResumeName = "") {
   const item = state.currentItem || {};
   const query = new URLSearchParams({
     source: "outlook-addin",
@@ -2017,7 +2017,7 @@ function buildLaunchContext(action) {
     replyToEmail: getPrimaryRecipient(item.replyTo).email,
     attachmentCount: String(item.attachmentCount || 0),
     hasResume: item.hasResumeAttachment ? "true" : "false",
-    resumeFile: item.primaryResumeName || "",
+    resumeFile: selectedResumeName || item.primaryResumeName || "",
     platform: state.officePlatform || "preview",
     host: state.officeHost || "preview"
   });
@@ -2633,13 +2633,13 @@ function buildBridgeLoginData() {
   };
 }
 
-function buildTargetPath(actionId) {
+function buildTargetPath(actionId, selectedResumeName = "") {
   const action = ACTIONS.find((entry) => entry.id === actionId);
   if (!action) {
     throw new Error("Unknown action requested.");
   }
 
-  return `${action.path}?${buildLaunchContext(action)}`;
+  return `${action.path}?${buildLaunchContext(action, selectedResumeName)}`;
 }
 
 function buildOutlookActionImportPayload(actionId, options = {}) {
@@ -2743,7 +2743,7 @@ function buildInlineOutlookImportFallback(outlookImport) {
 }
 
 function buildAuthBridgeUrl(actionId, bridgeData = {}) {
-  const redirectTo = buildTargetPath(actionId);
+  const redirectTo = buildTargetPath(actionId, bridgeData.selectedResumeName);
   const bridgeLoginData = buildBridgeLoginData();
   const loginExpirySeconds = Number(bridgeLoginData.expires_in || 0);
   const fallbackExpiration =
@@ -2838,6 +2838,7 @@ function launchAction(actionId, options = {}) {
       // Repeating parsed resume/email data in the hash can make the URL large
       // enough that Chrome leaves the reserved action tab on about:blank.
       // Keep the inline data only for legacy flows that have no session.
+      selectedResumeName: options.selectedResume?.FileName || options.outlookCandidateImport?.selectedResumeName || "",
       outlookCandidateImport: hasImportSession ? null : options.outlookCandidateImport,
       outlookImportSessionId: options.outlookImportSessionId,
       outlookImportApiHost: options.outlookImportApiHost,
