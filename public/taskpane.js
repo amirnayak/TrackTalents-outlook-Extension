@@ -222,7 +222,9 @@ function isAddCandidateAction(actionId) {
 }
 
 function isResumeImportAction(actionId) {
-  return ["add-candidate", "source-resume-job", "submit-resume-contact"].includes(actionId);
+  // Contact submission selects an existing ATS candidate and their saved resume.
+  // It must also work from contact emails that have no resume attachments.
+  return ["add-candidate", "source-resume-job"].includes(actionId);
 }
 
 function isAttachEmailAction(actionId) {
